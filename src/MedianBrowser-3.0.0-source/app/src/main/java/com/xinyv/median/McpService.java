@@ -886,7 +886,7 @@ public final class McpService implements MiniHttpServer.Handler {
                                 + "@" + res.getDisplayMetrics().densityDpi + "dpi");
                         return j;
                     } catch (Exception e) {
-                        return new JSONObject().put("error", String.valueOf(e));
+                        return null;
                     }
                 }
             }, 3000);
