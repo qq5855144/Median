@@ -256,6 +256,10 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_new_tab", "新建标签页并激活", schema(
                 new JSONObject().put("url", prop("string", "新标签打开的网址，默认主页")), null)));
         tools.put(tool("browser_close", "关闭当前标签页", schema(null, null)));
+        tools.put(tool("browser_back", "后退：等价点击底部工具栏后退按钮", schema(null, null)));
+        tools.put(tool("browser_forward", "前进：等价点击底部工具栏前进按钮", schema(null, null)));
+        tools.put(tool("browser_reload", "刷新当前页面（主页时重新加载主页）", schema(null, null)));
+        tools.put(tool("browser_home", "返回浏览器主页（Median 主页）", schema(null, null)));
         tools.put(tool("browser_console", "读取页面 Console 日志（error/warn/log 等）", schema(null, null)));
         tools.put(tool("browser_network", "读取页面网络请求记录（URL、类型、主框架、时间）与资源性能条目", schema(null, null)));
         tools.put(tool("browser_perf", "读取页面性能指标（FCP、DOM 大小、资源数量等）", schema(null, null)));
@@ -311,6 +315,10 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_tabs".equals(name)) return tabs();
             if ("browser_new_tab".equals(name)) return newTab(args);
             if ("browser_close".equals(name)) return closeTab();
+            if ("browser_back".equals(name)) return nav("back");
+            if ("browser_forward".equals(name)) return nav("forward");
+            if ("browser_reload".equals(name)) return nav("reload");
+            if ("browser_home".equals(name)) return nav("home");
             if ("browser_console".equals(name)) return console(args);
             if ("browser_network".equals(name)) return network();
             if ("browser_perf".equals(name)) return perf();
@@ -627,6 +635,35 @@ public final class McpService implements MiniHttpServer.Handler {
         }, 3000);
         if (done == null || !done) return error("close tab failed");
         return new JSONObject().put("ok", true);
+    }
+    /** 原生导航：back/forward/reload/home —— 等价点击底部工具栏按钮（非网页 DOM）。 */
+    private JSONObject nav(String action) throws Exception {
+        final WebView wv = requireWebView();
+        Boolean done = ctl.onUi(new McpController.BlockingCall<Boolean>() {
+            @Override public Boolean run() {
+                try {
+                    if ("back".equals(action)) {
+                        if (!wv.canGoBack()) return false;
+                        wv.goBack();
+                    } else if ("forward".equals(action)) {
+                        if (!wv.canGoForward()) return false;
+                        wv.goForward();
+                    } else if ("reload".equals(action)) {
+                        wv.reload();
+                    } else if ("home".equals(action)) {
+                        wv.loadUrl("https://median.invalid/");
+                    } else {
+                        return false;
+                    }
+                    return true;
+                } catch (Exception e) {
+                    return false;
+                }
+            }
+        }, 3000);
+        if (done == null) return error("nav timeout");
+        if (!done) return error("unavailable: " + action);
+        return new JSONObject().put("ok", true).put("action", action);
     }
 
     private int tabCount() {
