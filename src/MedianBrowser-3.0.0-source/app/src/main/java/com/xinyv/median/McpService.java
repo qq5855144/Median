@@ -864,21 +864,38 @@ public final class McpService implements MiniHttpServer.Handler {
         WebView wv = null;
         try { wv = requireWebView(); } catch (Exception ignored) { }
         if (wv != null) {
-            out.put("url", wv.getUrl());
-            out.put("title", wv.getTitle());
-            String ua = wv.getSettings().getUserAgentString();
-            out.put("ua", ua);
-            String chromeVer = "";
-            int ci = ua.indexOf("Chrome/");
-            if (ci >= 0) {
-                int end = ua.indexOf(' ', ci);
-                chromeVer = ua.substring(ci + 7, end < 0 ? ua.length() : end);
+            final WebView fwv = wv;
+            JSONObject wi = ctl.onUi(new McpController.BlockingCall<JSONObject>() {
+                @Override public JSONObject run() {
+                    try {
+                        JSONObject j = new JSONObject();
+                        j.put("url", fwv.getUrl());
+                        j.put("title", fwv.getTitle());
+                        String ua = fwv.getSettings().getUserAgentString();
+                        j.put("ua", ua);
+                        String chromeVer = "";
+                        int ci = ua.indexOf("Chrome/");
+                        if (ci >= 0) {
+                            int end = ua.indexOf(' ', ci);
+                            chromeVer = ua.substring(ci + 7, end < 0 ? ua.length() : end);
+                        }
+                        j.put("webViewChrome", chromeVer);
+                        j.put("jsEnabled", fwv.getSettings().getJavaScriptEnabled());
+                        android.content.res.Resources res = fwv.getContext().getResources();
+                        j.put("screen", res.getDisplayMetrics().widthPixels + "x" + res.getDisplayMetrics().heightPixels
+                                + "@" + res.getDisplayMetrics().densityDpi + "dpi");
+                        return j;
+                    } catch (Exception e) {
+                        return new JSONObject().put("error", String.valueOf(e));
+                    }
+                }
+            }, 3000);
+            if (wi != null) {
+                for (java.util.Iterator<String> it = wi.keys(); it.hasNext(); ) {
+                    String k = it.next();
+                    out.put(k, wi.get(k));
+                }
             }
-            out.put("webViewChrome", chromeVer);
-            out.put("jsEnabled", wv.getSettings().getJavaScriptEnabled());
-            android.content.res.Resources res = wv.getContext().getResources();
-            out.put("screen", res.getDisplayMetrics().widthPixels + "x" + res.getDisplayMetrics().heightPixels
-                    + "@" + res.getDisplayMetrics().densityDpi + "dpi");
         }
         out.put("mcpPort", ctl.port());
         out.put("mcpToken", ctl.token());
