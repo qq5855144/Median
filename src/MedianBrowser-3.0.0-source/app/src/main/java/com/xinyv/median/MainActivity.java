@@ -962,6 +962,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                McpController.get().recordRunLog("info", "page", "start " + (url == null ? "" : url));
                 unresponsiveWebViews.remove(view);
                 cancelScriptRequests(view);
                 if (!isHomeUrl(url)) {
@@ -1015,6 +1016,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                McpController.get().recordRunLog("info", "page", "finished " + (url == null ? "" : url));
                 if (isHomeUrl(url)) verifyTrustedHome(view);
                 updateTabForView(view, url, view.getTitle());
                 if (url != null) {
@@ -1080,6 +1082,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 super.onReceivedError(view, request, error);
+                McpController.get().recordRunLog("error", "page", "load error " + (request == null || request.getUrl() == null ? "" : request.getUrl().toString())
+                        + " code=" + (error == null ? "?" : error.getErrorCode()));
                 if (view == webView && request != null && request.isForMainFrame() &&
                         error != null && compatibilityRelevantError(error.getErrorCode())) {
                     String failed = request.getUrl() == null ? currentPageUrl : request.getUrl().toString();
@@ -5289,6 +5293,47 @@ public final class MainActivity extends Activity implements McpController.UiBind
     @Override public List<?> liveTabs() { return tabs; }
     @Override public Object dataStore() { return dataStore; }
     @Override public boolean isPrivateMode() { return false; }
+    @Override public String applySetting(String key, String value) {
+        try {
+            if (key == null) return "key required";
+            if ("night".equals(key) || "nightMode".equals(key)) {
+                nightMode = "true".equalsIgnoreCase(value) || "1".equals(value);
+                prefs.edit().putBoolean("night_mode", nightMode).apply();
+                applyDarkMode();
+                if (isHomeUrl(currentPageUrl)) showHome(); else webView.reload();
+                return null;
+            }
+            if ("adBlock".equals(key) || "adblock".equals(key)) {
+                adBlockEnabled = "true".equalsIgnoreCase(value) || "1".equals(value);
+                prefs.edit().putBoolean("adblock", adBlockEnabled).apply();
+                adBlockActiveByView.clear();
+                webView.reload();
+                return null;
+            }
+            if ("performance".equals(key) || "performanceMode".equals(key)) {
+                setPerformanceMode(value);
+                return null;
+            }
+            if ("searchEngine".equals(key) || "engine".equals(key)) {
+                setSearchEngine(value);
+                if (isHomeUrl(currentPageUrl)) showHome();
+                return null;
+            }
+            return "unknown setting: " + key;
+        } catch (Exception e) {
+            return e.getMessage() == null ? e.toString() : e.getMessage();
+        }
+    }
+    @Override public void addBookmark(String url, String title) {
+        if (url == null || url.isEmpty()) return;
+        String t = title == null || title.isEmpty() ? url : title;
+        boolean exists = false;
+        for (Object b : dataStore.bookmarks()) {
+            if (b instanceof BrowserDataStore.Bookmark && url.equals(((BrowserDataStore.Bookmark) b).url)) { exists = true; break; }
+        }
+        if (!exists) dataStore.toggleBookmark(t, url);
+    }
+    @Override public void clearHistory() { dataStore.clearHistory(); }
     @Override public void newTab(String url) {
         newTab();
         if (url != null && url.length() > 0 && webView != null) {
@@ -7027,7 +7072,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         });
     }
 
-    private JSONObject settingsSnapshot() throws Exception {
+    @Override public JSONObject settingsSnapshot() {
+        try {
         JSONObject value = new JSONObject();
         value.put("adBlock", adBlockEnabled);
         value.put("desktop", desktopMode);
@@ -7075,6 +7121,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
         value.put("homeCustomHtml", CustomHomeHtml.clean(prefs.getString("home_custom_html", "")));
         value.put("homeCustomHtmlVersion", home.customHtmlVersion);
         return value;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void restoreFullBackup(final Uri uri, final char[] password) {

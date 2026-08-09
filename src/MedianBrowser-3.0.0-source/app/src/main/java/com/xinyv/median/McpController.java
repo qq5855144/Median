@@ -42,7 +42,7 @@ public final class McpController {
     private static final int DEFAULT_PORT = 8788;
     private static final int MAX_CONSOLE = 500;
     private static final int MAX_NETWORK = 400;
-
+    private static final int MAX_RUNLOG = 400;
     /** 界面绑定：MainActivity 在 onResume 挂接、onPause 解绑。 */
     public interface UiBindings {
         WebView currentWebView();
@@ -52,6 +52,10 @@ public final class McpController {
         void newTab(String url);     // 新建标签并激活
         void closeCurrentTab();      // 关闭当前标签
         void switchTab(int index);   // 切换标签
+        JSONObject settingsSnapshot();   // 浏览器设置快照（夜间/拦截/性能/引擎/UA）
+        String applySetting(String key, String value); // 修改设置，null=成功
+        void addBookmark(String url, String title);    // 添加书签（已存在则忽略）
+        void clearHistory();         // 清空浏览历史
     }
 
     private static volatile McpController instance;
@@ -59,6 +63,7 @@ public final class McpController {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<JSONObject> consoleLogs = Collections.synchronizedList(new ArrayList<JSONObject>());
     private final List<JSONObject> networkLogs = Collections.synchronizedList(new ArrayList<JSONObject>());
+    private final List<JSONObject> runLogs = Collections.synchronizedList(new ArrayList<JSONObject>());
     private final Map<String, Long> counters = Collections.synchronizedMap(new LinkedHashMap<String, Long>());
 
     private volatile UiBindings bindings;
@@ -90,7 +95,27 @@ public final class McpController {
     public void newTab(String url) { if (bindings != null) bindings.newTab(url); }
     public void closeCurrentTab() { if (bindings != null) bindings.closeCurrentTab(); }
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }
-
+    public JSONObject settingsSnapshot() { return bindings == null ? null : bindings.settingsSnapshot(); }
+    public String applySetting(String key, String value) { return bindings == null ? "mcp not attached" : bindings.applySetting(key, value); }
+    public void addBookmark(String url, String title) { if (bindings != null) bindings.addBookmark(url, title); }
+    public void clearHistory() { if (bindings != null) bindings.clearHistory(); }
+    /** 记录浏览器运行日志（环形缓冲）。level: info/warn/error。 */
+    public void recordRunLog(String level, String source, String message) {
+        JSONObject entry = new JSONObject();
+        try {
+            entry.put("ts", System.currentTimeMillis());
+            entry.put("level", level == null ? "info" : level);
+            entry.put("src", source == null ? "app" : source);
+            entry.put("msg", message == null ? "" : message);
+        } catch (Exception ignored) { }
+        synchronized (runLogs) {
+            runLogs.add(entry);
+            while (runLogs.size() > MAX_RUNLOG) runLogs.remove(0);
+        }
+    }
+    public List<JSONObject> runLogSnapshot() {
+        synchronized (runLogs) { return new ArrayList<JSONObject>(runLogs); }
+    }
     public synchronized void start(Context context) {
         Context app = context.getApplicationContext();
         SharedPreferences prefs = prefs(app);
@@ -121,6 +146,7 @@ public final class McpController {
                 srv.start();
                 service = s;
                 server = srv;
+                recordRunLog("info", "mcp", "MCP server started, port=" + p);
                 return p;
             } catch (Exception ignored) {
                 // 端口被占用，尝试下一个

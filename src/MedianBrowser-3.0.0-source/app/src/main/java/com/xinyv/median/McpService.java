@@ -10,6 +10,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -266,6 +267,23 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_report", "生成综合诊断报告（页面、Console、Network、性能汇总）", schema(null, null)));
         tools.put(tool("browser_history", "读取浏览历史", schema(null, null)));
         tools.put(tool("browser_bookmarks", "读取书签", schema(null, null)));
+        tools.put(tool("browser_logs", "读取浏览器运行日志（应用自身事件，含页面加载/错误/MCP 状态）", schema(
+                new JSONObject().put("limit", prop("number", "最多返回条数，默认 200")), null)));
+        tools.put(tool("browser_info", "浏览器与设备诊断信息（版本、UA、屏幕、MCP、设置快照）", schema(null, null)));
+        tools.put(tool("browser_settings", "读取/修改浏览器设置：action=get 读取全部；action=set 时 key ∈ night|adBlock|performance|searchEngine", schema(
+                new JSONObject().put("action", prop("string", "get 或 set")).put("key", prop("string", "设置键：night/adBlock/performance/searchEngine"))
+                        .put("value", prop("string", "设置值：true/false / standard|performance|powersave / google|baidu|bing|custom")),
+                new String[]{"action"})));
+        tools.put(tool("browser_scroll", "滚动页面：direction ∈ top|bottom|up|down，pixels 可选（默认 80% 屏高）", schema(
+                new JSONObject().put("direction", prop("string", "top/bottom/up/down")).put("pixels", prop("number", "滚动像素，可选")),
+                new String[]{"direction"})));
+        tools.put(tool("browser_cookies", "读取当前站点或指定 URL 的 Cookie", schema(
+                new JSONObject().put("url", prop("string", "目标 URL，默认当前页面")), null)));
+        tools.put(tool("browser_storage", "读取当前页面 localStorage/sessionStorage（调试网站用）", schema(null, null)));
+        tools.put(tool("browser_bookmark_add", "添加书签（已存在则忽略）", schema(
+                new JSONObject().put("url", prop("string", "书签 URL")).put("title", prop("string", "书签标题，默认用 URL")),
+                new String[]{"url"})));
+        tools.put(tool("browser_history_clear", "清空浏览历史", schema(null, null)));
         tools.put(tool("browser_http", "从服务端发起 HTTP GET 请求（带大小限制）", schema(
                 new JSONObject().put("url", prop("string", "目标 URL（http/https）")).put("maxBytes", prop("number", "响应最大字节数，默认 65536")),
                 new String[]{"url"})));
@@ -325,6 +343,14 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_report".equals(name)) return report();
             if ("browser_history".equals(name)) return history(args);
             if ("browser_bookmarks".equals(name)) return bookmarks(args);
+            if ("browser_logs".equals(name)) return logs(args);
+            if ("browser_info".equals(name)) return info();
+            if ("browser_settings".equals(name)) return settings(args);
+            if ("browser_scroll".equals(name)) return scroll(args);
+            if ("browser_cookies".equals(name)) return cookies(args);
+            if ("browser_storage".equals(name)) return storage();
+            if ("browser_bookmark_add".equals(name)) return bookmarkAdd(args);
+            if ("browser_history_clear".equals(name)) return historyClear();
             if ("browser_http".equals(name)) return httpRequest(args);
             if ("browser_clear".equals(name)) return clear();
             // 隐藏别名（兼容 BrowserDiag 习惯，坐标由 browser_click_at 使用）
@@ -820,8 +846,153 @@ public final class McpService implements MiniHttpServer.Handler {
         }
         return new JSONObject().put("count", arr.length()).put("items", arr);
     }
-
-    /** 服务端 HTTP GET（带大小限制），用于无法用 JS 直接请求的场景。 */
+    /** 浏览器运行日志（应用自身事件）。 */
+    private JSONObject logs(JSONObject args) throws Exception {
+        List<JSONObject> all = ctl.runLogSnapshot();
+        int limit = args.optInt("limit", 200);
+        if (limit > 0 && all.size() > limit) all = new ArrayList<JSONObject>(all.subList(all.size() - limit, all.size()));
+        JSONArray arr = new JSONArray();
+        for (JSONObject e : all) arr.put(e);
+        return new JSONObject().put("count", arr.length()).put("items", arr);
+    }
+    /** 浏览器与设备诊断信息。 */
+    private JSONObject info() throws Exception {
+        JSONObject out = new JSONObject();
+        out.put("app", "Median " + VERSION);
+        out.put("android", android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")");
+        out.put("model", android.os.Build.MODEL);
+        WebView wv = null;
+        try { wv = requireWebView(); } catch (Exception ignored) { }
+        if (wv != null) {
+            out.put("url", wv.getUrl());
+            out.put("title", wv.getTitle());
+            String ua = wv.getSettings().getUserAgentString();
+            out.put("ua", ua);
+            String chromeVer = "";
+            int ci = ua.indexOf("Chrome/");
+            if (ci >= 0) {
+                int end = ua.indexOf(' ', ci);
+                chromeVer = ua.substring(ci + 7, end < 0 ? ua.length() : end);
+            }
+            out.put("webViewChrome", chromeVer);
+            out.put("jsEnabled", wv.getSettings().getJavaScriptEnabled());
+            android.content.res.Resources res = wv.getContext().getResources();
+            out.put("screen", res.getDisplayMetrics().widthPixels + "x" + res.getDisplayMetrics().heightPixels
+                    + "@" + res.getDisplayMetrics().densityDpi + "dpi");
+        }
+        out.put("mcpPort", ctl.port());
+        out.put("mcpToken", ctl.token());
+        out.put("tabCount", tabCount());
+        out.put("consoleCount", ctl.consoleSnapshot().size());
+        out.put("networkCount", ctl.networkSnapshot().size());
+        out.put("runLogCount", ctl.runLogSnapshot().size());
+        JSONObject s = ctl.settingsSnapshot();
+        if (s != null) out.put("settings", s);
+        return out;
+    }
+    /** 读取/修改浏览器设置。 */
+    private JSONObject settings(JSONObject args) throws Exception {
+        String action = args.optString("action", "get");
+        if ("get".equals(action)) {
+            JSONObject s = ctl.settingsSnapshot();
+            if (s == null) return error("mcp not attached");
+            return s;
+        }
+        if ("set".equals(action)) {
+            String key = args.optString("key", "");
+            String value = args.optString("value", "");
+            if (key.isEmpty()) return error("key required");
+            String err = ctl.applySetting(key, value);
+            if (err != null) return error(err);
+            JSONObject out = new JSONObject().put("ok", true).put("key", key).put("value", value);
+            JSONObject s = ctl.settingsSnapshot();
+            if (s != null) out.put("settings", s);
+            return out;
+        }
+        return error("action must be get|set");
+    }
+    /** 页面滚动。 */
+    private JSONObject scroll(JSONObject args) throws Exception {
+        final WebView wv = requireWebView();
+        String direction = args.optString("direction", "down");
+        if (!"up".equals(direction) && !"down".equals(direction) && !"top".equals(direction) && !"bottom".equals(direction)) {
+            return error("direction must be up|down|top|bottom");
+        }
+        final int pixels = args.optInt("pixels", 0);
+        String script = "(function(){var d=" + jsonString(direction) + ",p=" + pixels + ";"
+                + "var max=Math.max(document.documentElement.scrollHeight-document.documentElement.clientHeight,"
+                + "document.body.scrollHeight-window.innerHeight);if(max<0)max=0;"
+                + "var y;if(d==='top')y=0;else if(d==='bottom')y=max;"
+                + "else if(d==='up')y=Math.max(0,window.scrollY-(p||Math.round(window.innerHeight*0.8)));"
+                + "else y=Math.min(max,window.scrollY+(p||Math.round(window.innerHeight*0.8)));"
+                + "window.scrollTo(0,y);return JSON.stringify({y:window.scrollY,max:max,dir:d})})()";
+        String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
+        Object decoded = decodeEvalValue(raw);
+        if (!(decoded instanceof JSONObject)) return error("unexpected scroll result");
+        return (JSONObject) decoded;
+    }
+    /** 读取 Cookie。 */
+    private JSONObject cookies(JSONObject args) throws Exception {
+        final WebView wv = requireWebView();
+        final String url = args.optString("url", "").trim();
+        String target = url.isEmpty() ? (wv.getUrl() == null ? "" : wv.getUrl()) : url;
+        if (target.isEmpty()) return error("no current url, pass url param");
+        final String fTarget = target;
+        final String[] cookie = new String[1];
+        Boolean done = ctl.onUi(new McpController.BlockingCall<Boolean>() {
+            @Override public Boolean run() {
+                try {
+                    cookie[0] = android.webkit.CookieManager.getInstance().getCookie(fTarget);
+                    return true;
+                } catch (Exception e) {
+                    cookie[0] = null;
+                    return false;
+                }
+            }
+        }, 3000);
+        if (done == null) return error("cookie timeout");
+        if (!done) return error("cookie read failed");
+        JSONObject out = new JSONObject().put("url", fTarget);
+        if (cookie[0] == null || cookie[0].isEmpty()) {
+            out.put("count", 0).put("cookies", new JSONObject());
+            return out;
+        }
+        JSONObject map = new JSONObject();
+        for (String pair : cookie[0].split(";")) {
+            String p = pair.trim();
+            int eq = p.indexOf('=');
+            if (eq > 0) map.put(p.substring(0, eq), p.substring(eq + 1));
+        }
+        return out.put("count", map.length()).put("cookies", map);
+    }
+    /** 读取 localStorage/sessionStorage（当前源）。 */
+    private JSONObject storage() throws Exception {
+        final WebView wv = requireWebView();
+        String script = "(function(){function dump(s){var o={};for(var i=0;i<s.length;i++){var k=s.key(i);"
+                + "var v=s.getItem(k);if(v!==null&&v.length>200)v=v.slice(0,200)+'...(truncated)';o[k]=v;}return o;}"
+                + "return JSON.stringify({origin:location.origin,local:dump(localStorage),session:dump(sessionStorage)})})()";
+        String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
+        Object decoded = decodeEvalValue(raw);
+        if (!(decoded instanceof JSONObject)) return error("unexpected storage result");
+        return (JSONObject) decoded;
+    }
+    /** 添加书签（便捷包装，已存在则忽略）。 */
+    private JSONObject bookmarkAdd(JSONObject args) throws Exception {
+        String url = args.optString("url", "").trim();
+        String title = args.optString("title", "").trim();
+        if (url.isEmpty()) return error("url required");
+        if (!isHttpUrl(url)) return error("valid http(s) url required");
+        ctl.addBookmark(url, title.isEmpty() ? url : title);
+        return new JSONObject().put("ok", true).put("url", url).put("title", title.isEmpty() ? url : title);
+    }
+    /** 清空浏览历史。 */
+    private JSONObject historyClear() throws Exception {
+        ctl.clearHistory();
+        return new JSONObject().put("ok", true);
+    }
+/** 服务端 HTTP GET（带大小限制），用于无法用 JS 直接请求的场景。 */
     private JSONObject httpRequest(JSONObject args) {
         String urlStr = args.optString("url", "").trim();
         if (!isHttpUrl(urlStr)) return error("valid http(s) url required");
