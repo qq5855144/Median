@@ -1,0 +1,13 @@
+Attempted APK build in ChatGPT sandbox on 2026-07-17.
+Result: APK was not produced because the sandbox does not include Android SDK / Build Tools.
+Required environment variables/tools:
+- ANDROID_SDK_ROOT or ANDROID_HOME
+- build-tools/35.0.0/aapt2
+- build-tools/35.0.0/zipalign
+- build-tools/35.0.0/apksigner
+- build-tools/35.0.0/lib/d8.jar
+- platforms/android-36/android.jar
+Version prepared:
+- versionName: 2.1.7
+- versionCode: 71
+请先设置 ANDROID_SDK_ROOT 或 ANDROID_HOME。

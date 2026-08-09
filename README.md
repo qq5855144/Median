@@ -23,11 +23,55 @@ Median 的核心取向是 **快、稳、轻、可控**：
 
 Median 不是独立浏览器内核。网页兼容性、JavaScript 性能、媒体格式和安全补丁仍取决于设备上的 Android System WebView。项目的目标是在这一基础上，提供一个更完整、更轻量、更可控的浏览器外壳。
 
-当前版本：**2.1.9** 
+当前版本：**3.0.0** 
 最低系统：Android 8.0（API 26）  
 目标系统：Android 16（API 36）
 
 > Median 使用设备上的 Android System WebView。网页渲染能力、编解码器、部分网站兼容性和安全补丁取决于设备所安装的 WebView 版本。
+
+## MCP 与开发者工具
+Median 3.0 内置轻量 MCP（Model Context Protocol）服务端，让 AI 客户端可以像操作 BrowserDiag 一样**可视化操作浏览器**：打开网页、截图、点击、输入、取 DOM、诊断 Console/Network/性能，全部通过进程内自研实现，**零第三方依赖**，仅增加约 20KB 体积。
+
+### 启动与地址
+- 打开浏览器 → 菜单 → **MCP 与开发者工具** → 开启 MCP 服务。
+- 默认端口 **8788**（被占用时自动回退并记忆），Token 持久化，重启后地址与 Token 不变。
+- 默认仅监听本机 `127.0.0.1`；需要局域网访问时在面板中开启“局域网访问”。
+- 面板提供“复制 MCP 配置（JSON）”与“复制 curl 测试命令”，一键接入 Claude / Cursor / 自定义 MCP 客户端。
+
+### MCP 端点
+- Streamable HTTP：`http://<设备IP>:8788/mcp`（根 `/` 兼容别名）
+- 健康检查：`/health`
+- HTTP Bridge 兼容：`/api/browser_<tool>`（GET/POST，参数走 query 或 JSON body）
+- 认证：`Authorization: Bearer <token>` 或 `X-Median-Token: <token>`
+
+### 工具列表（24 个 browser_*）
+| 类别 | 工具 |
+| --- | --- |
+| 导航 | browser_open / browser_nav / browser_state / browser_tabs / browser_new_tab / browser_close |
+| 读取 | browser_dom / browser_text / browser_links / browser_source / browser_eval |
+| 操作 | browser_click / browser_click_at / browser_type / browser_keyboard |
+| 可视化 | browser_screenshot（返回 JPEG 图片块） |
+| 诊断 | browser_console / browser_network / browser_perf / browser_report / browser_clear |
+| 数据 | browser_history / browser_bookmarks / browser_http |
+
+### 开发者能力
+- **Console 日志**：WebChromeClient 实时采集（error/warn/log，上限 500 条）。
+- **Network 记录**：shouldInterceptRequest 采集请求（URL/主框架/方法，上限 400 条）。
+- **综合诊断报告**：`browser_report` 汇总页面状态、Console 错误、失败请求、TTFB/加载性能并给出健康度结论。
+- **AI 可视化操作**：`browser_screenshot` 截图 + `browser_interactive`（隐藏别名）获取可点击元素坐标 → `browser_click_at` 真实触摸事件点击。
+
+### 配置示例（mcpServers）
+```json
+{
+  "mcpServers": {
+    "median": {
+      "url": "http://192.168.1.100:8788/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+安全提示：开启“局域网访问”后，局域网内任何持有 Token 的客户端均可控制浏览器；请仅在可信网络中使用，并妥善保管 Token。
 
 ## 核心能力
 
