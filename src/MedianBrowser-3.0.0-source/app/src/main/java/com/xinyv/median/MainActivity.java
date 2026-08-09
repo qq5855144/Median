@@ -2487,10 +2487,16 @@ public final class MainActivity extends Activity implements McpController.UiBind
         final McpController ctl = McpController.get();
         boolean enabled = ctl.enabled(this);
         boolean lan = ctl.lanEnabled(this);
-        String subtitle = enabled
-                ? "地址 " + ctl.endpointUrl(false) + "\nToken " + (ctl.token() == null ? "-" : ctl.token().substring(0, 6) + "…")
-                : "MCP 服务未开启";
+        String token = ctl.token();
+        String localUrl = ctl.endpointUrl(false);
+        String lanUrl = ctl.endpointUrl(true);
+        String tokenShown = token == null ? "（未生成）"
+                : (token.length() > 12 ? token.substring(0, 12) + "…" : token);
+        String subtitle = enabled ? "点击连接信息自动复制" : "MCP 服务未开启";
         String[] items = new String[] {
+                "本机地址（稳定）\n" + localUrl,
+                "局域网地址\n" + lanUrl + (lan ? "" : "（未开启）"),
+                "Token\n" + tokenShown,
                 "MCP 服务：" + (enabled ? "已开启" : "已关闭"),
                 "局域网访问：" + (lan ? "已开启" : "已关闭（仅本机）"),
                 "复制 MCP 配置（JSON）",
@@ -2498,32 +2504,42 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "查看状态与统计",
                 "重启 MCP 服务"
         };
-        showActionSheet("MCP 与开发者工具", subtitle, items, null, new SheetHandler() {
+        showActionSheet("MCP 连接信息", subtitle, items, null, new SheetHandler() {
             @Override public void onItem(int which) {
                 switch (which) {
                     case 0:
+                        copyText(localUrl, "本机地址已复制");
+                        break;
+                    case 1:
+                        copyText(lanUrl, "局域网地址已复制");
+                        break;
+                    case 2:
+                        if (token == null) toast("Token 未生成，请先开启 MCP 服务");
+                        else copyText(token, "Token 已复制");
+                        break;
+                    case 3:
                         boolean next = !ctl.enabled(MainActivity.this);
                         ctl.setEnabled(MainActivity.this, next);
                         if (next) ctl.start(MainActivity.this);
                         else ctl.stop();
                         toast(next ? "MCP 服务已开启" : "MCP 服务已关闭");
                         break;
-                    case 1:
+                    case 4:
                         boolean nextLan = !ctl.lanEnabled(MainActivity.this);
                         ctl.setLanEnabled(MainActivity.this, nextLan);
                         ctl.restart(MainActivity.this);
                         toast(nextLan ? "局域网访问已开启" : "已切换为仅本机访问");
                         break;
-                    case 2:
+                    case 5:
                         copyMcpConfig(false);
                         break;
-                    case 3:
+                    case 6:
                         copyMcpConfig(true);
                         break;
-                    case 4:
+                    case 7:
                         showMcpStatus(ctl);
                         break;
-                    case 5:
+                    case 8:
                         ctl.restart(MainActivity.this);
                         toast("MCP 服务已重启");
                         break;
@@ -2531,6 +2547,16 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 }
             }
         });
+    }
+
+    /** 复制文本到剪贴板并提示。 */
+    private void copyText(String text, String message) {
+        if (text == null || text.length() == 0) return;
+        ClipboardManager manager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (manager != null) {
+            manager.setPrimaryClip(ClipData.newPlainText("Median MCP", text));
+            toast(message);
+        }
     }
 
     private void copyMcpConfig(boolean curl) {

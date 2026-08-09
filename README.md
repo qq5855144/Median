@@ -36,7 +36,11 @@ Median 3.0 内置轻量 MCP（Model Context Protocol）服务端，让 AI 客户
 - 打开浏览器 → 菜单 → **MCP 与开发者工具** → 开启 MCP 服务。
 - 默认端口 **8788**（被占用时自动回退并记忆），Token 持久化，重启后地址与 Token 不变。
 - 默认仅监听本机 `127.0.0.1`；需要局域网访问时在面板中开启“局域网访问”。
-- 面板提供“复制 MCP 配置（JSON）”与“复制 curl 测试命令”，一键接入 Claude / Cursor / 自定义 MCP 客户端。
+- 面板首屏直接显示三种连接信息，**点击任意一行自动复制**：
+  1. **本机地址（稳定）**：`http://127.0.0.1:8788/mcp` —— 本机 AI 客户端连接用；
+  2. **局域网地址**：`http://<设备IP>:8788/mcp` —— 同一 Wi-Fi 下其他设备连接用（需先开启“局域网访问”）；
+  3. **Token**：`Authorization: Bearer <token>` 认证凭据。
+- 面板同时提供“复制 MCP 配置（JSON）”与“复制 curl 测试命令”，一键接入 Claude / Cursor / 自定义 MCP 客户端。
 
 ### MCP 端点
 - Streamable HTTP：`http://<设备IP>:8788/mcp`（根 `/` 兼容别名）
