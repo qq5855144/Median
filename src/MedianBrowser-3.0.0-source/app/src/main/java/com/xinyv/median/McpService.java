@@ -1005,11 +1005,15 @@ public final class McpService implements MiniHttpServer.Handler {
             "(function(){var els=Array.from(document.querySelectorAll('a[href],button,input,select,textarea,[role=button],[onclick],[tabindex]'))"
                     + ".filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0}).slice(0,60);"
                     + "return JSON.stringify(els.map(function(e,i){"
-                    + "function sel(n){if(!n||n===document.body)return '';if(n.id)return '#'+n.id;"
-                    + "var p=n.parentElement;var s=p?Array.from(p.children).indexOf(n)+1:1;return sel(p)+'>'+n.tagName.toLowerCase()+':nth-child('+s+')'}"
+                    + "function sel(n){if(!n||n===document.body)return 'body';if(n.id)return '#'+n.id;"
+                    + "var parts=[],cur=n;for(var k=0;k<4&&cur&&cur!==document.body;k++){"
+                    + "var cls='';if(cur.className&&typeof cur.className==='string'){var m=cur.className.trim().split(/\\s+/)[0];if(m)cls=m;}"
+                    + "var tag=cur.tagName.toLowerCase();var p=cur.parentElement;var s=p?Array.from(p.children).indexOf(cur)+1:1;"
+                    + "parts.unshift(cls?tag+'.'+cls:tag+':nth-child('+s+')');cur=p;}"
+                    + "return parts.join(' > ')}"
                     + "var r=e.getBoundingClientRect();"
                     + "return{tag:e.tagName.toLowerCase(),text:(e.innerText||e.value||e.getAttribute('aria-label')||'').trim().slice(0,80),"
-                    + "href:e.getAttribute('href')||'',type:e.getAttribute('type')||'',selector:sel(e).slice(0,200),"
+                    + "href:e.getAttribute('href')||'',type:e.getAttribute('type')||'',selector:sel(e).slice(0,300),"
                     + "x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}}))})()";
 
     private static final String PAGE_PERF_JS =
