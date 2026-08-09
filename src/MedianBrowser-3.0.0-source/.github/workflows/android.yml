@@ -25,15 +25,16 @@ jobs:
       - name: Static security checks
         run: ./tools/static_checks.sh
       - name: Lint, tests and build
-        run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug bundleRelease
+        run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
       - name: Checksums
-        run: sha256sum app/build/outputs/apk/debug/app-debug.apk app/build/outputs/bundle/release/app-release.aab | tee SHA256SUMS.txt
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk app/build/outputs/bundle/release/app-release.aab | tee SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: median-ci-${{ github.sha }}
           if-no-files-found: error
           path: |
             app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
             app/build/outputs/bundle/release/app-release.aab
             app/build/reports/lint-results-debug.html
             app/build/test-results/testDebugUnitTest/

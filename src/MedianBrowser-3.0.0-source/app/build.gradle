@@ -26,16 +26,23 @@ android {
             def storePasswordValue = System.getenv('MEDIAN_STOREPASS')
             def keyAliasValue = System.getenv('MEDIAN_KEY_ALIAS')
             def keyPasswordValue = System.getenv('MEDIAN_KEYPASS') ?: storePasswordValue
+            def repoStore = rootProject.file('keystore/median-release.keystore')
             if (storeFileValue && storePasswordValue && keyAliasValue && keyPasswordValue) {
                 storeFile file(storeFileValue)
                 storePassword storePasswordValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue
-                enableV1Signing true
-                enableV2Signing true
-                enableV3Signing true
-                enableV4Signing true
+            } else if (repoStore.exists()) {
+                // 仓库内置开发签名（固定密钥，保证 CI/本地构建可覆盖安装）
+                storeFile repoStore
+                storePassword 'median@2026'
+                keyAlias 'median'
+                keyPassword 'median@2026'
             }
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+            enableV4Signing true
         }
     }
 
@@ -44,6 +51,7 @@ android {
             applicationIdSuffix '.debug'
             versionNameSuffix '-debug'
             debuggable true
+            if (signingConfigs.release.storeFile != null) signingConfig signingConfigs.release
         }
         release {
             minifyEnabled true
