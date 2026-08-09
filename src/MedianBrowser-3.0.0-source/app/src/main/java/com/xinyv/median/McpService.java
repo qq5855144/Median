@@ -44,14 +44,14 @@ public final class McpService implements MiniHttpServer.Handler {
     // ==================== HTTP 入口 ====================
 
     @Override
-    public MiniHttpServer.Response handle(String method, String path, Map<String, String> headers, byte[] body) {
+    public MiniHttpServer.Response handle(String method, String path, Map<String, String> headers, byte[] body, String remoteHost) {
         String cleanPath = path;
         int q = cleanPath.indexOf('?');
         if (q >= 0) cleanPath = cleanPath.substring(0, q);
         if ("/health".equals(cleanPath)) {
             return MiniHttpServer.Response.ok("{\"ok\":true,\"name\":\"" + SERVER_NAME + "\",\"version\":\"" + VERSION + "\"}");
         }
-        if (!authorized(headers)) {
+        if (!authorized(headers, remoteHost)) {
             return MiniHttpServer.Response.unauthorized();
         }
         if ("/api/".equals(cleanPath) || cleanPath.startsWith("/api/")) {
@@ -63,7 +63,14 @@ public final class McpService implements MiniHttpServer.Handler {
         return MiniHttpServer.Response.error(404, "not found: " + cleanPath);
     }
 
-    private boolean authorized(Map<String, String> headers) {
+    /**
+     * 认证策略（三选一即可完整调用）：
+     * 1. 本机地址（127.0.0.1 / ::1 回环）访问 → 免 Token；
+     * 2. 局域网/远程地址访问 → 必须携带有效 Token；
+     * 3. 携带有效 Token（Authorization: Bearer 或 X-Median-Token）→ 任意地址均可。
+     */
+    private boolean authorized(Map<String, String> headers, String remoteHost) {
+        if (isLoopback(remoteHost)) return true;
         if (token == null || token.isEmpty()) return false;
         String authorization = headers.get("authorization");
         if (authorization != null && authorization.startsWith("Bearer ")) {
@@ -71,6 +78,16 @@ public final class McpService implements MiniHttpServer.Handler {
         }
         String direct = headers.get("x-median-token");
         return direct != null && constantTimeEquals(token, direct.trim());
+    }
+
+    /** 判断客户端 IP 是否为回环地址（本机访问免认证）。 */
+    private static boolean isLoopback(String host) {
+        if (host == null || host.isEmpty()) return false;
+        String h = host.trim();
+        if ("localhost".equalsIgnoreCase(h)) return true;
+        if (h.startsWith("127.")) return true;
+        if ("::1".equals(h) || "0:0:0:0:0:0:0:1".equals(h)) return true;
+        return h.startsWith("0:0:0:0:0:0:0:1");
     }
 
     private static boolean constantTimeEquals(String a, String b) {

@@ -48,7 +48,8 @@ public final class MiniHttpServer {
     }
 
     public interface Handler {
-        Response handle(String method, String path, Map<String, String> headers, byte[] body);
+        /** @param remoteHost 客户端 IP（回环为 127.0.0.1 / ::1）。 */
+        Response handle(String method, String path, Map<String, String> headers, byte[] body, String remoteHost);
     }
 
     private static final int MAX_BODY = 1024 * 1024;
@@ -160,7 +161,8 @@ public final class MiniHttpServer {
             if ("OPTIONS".equalsIgnoreCase(method)) {
                 return plain(204, "text/plain", "");
             }
-            Response response = handler.handle(method, path, headers, body);
+            Response response = handler.handle(method, path, headers, body,
+                    socket.getInetAddress() == null ? "" : socket.getInetAddress().getHostAddress());
             if (response == null) response = Response.error(500, "no response");
             return buildResponse(response.status, response.contentType, response.body);
         }

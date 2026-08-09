@@ -46,7 +46,10 @@ Median 3.0 内置轻量 MCP（Model Context Protocol）服务端，让 AI 客户
 - Streamable HTTP：`http://<设备IP>:8788/mcp`（根 `/` 兼容别名）
 - 健康检查：`/health`
 - HTTP Bridge 兼容：`/api/browser_<tool>`（GET/POST，参数走 query 或 JSON body）
-- 认证：`Authorization: Bearer <token>` 或 `X-Median-Token: <token>`
+- 认证策略（**三选一即可完整调用**）：
+  1. **本机地址**访问（`127.0.0.1` / `::1` 回环）→ 免 Token；
+  2. **局域网/远程地址**访问 → 需携带 Token（`Authorization: Bearer <token>` 或 `X-Median-Token: <token>`）；
+  3. 携带有效 **Token** → 任意地址均可调用。
 
 ### 工具列表（24 个 browser_*）
 | 类别 | 工具 |
