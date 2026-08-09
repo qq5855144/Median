@@ -953,7 +953,16 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject cookies(JSONObject args) throws Exception {
         final WebView wv = requireWebView();
         final String url = args.optString("url", "").trim();
-        String target = url.isEmpty() ? (wv.getUrl() == null ? "" : wv.getUrl()) : url;
+        String target = url;
+        if (target.isEmpty()) {
+            final String[] cur = new String[1];
+            Boolean got = ctl.onUi(new McpController.BlockingCall<Boolean>() {
+                @Override public Boolean run() {
+                    try { cur[0] = wv.getUrl(); return true; } catch (Exception e) { return false; }
+                }
+            }, 3000);
+            if (got != null && got) target = cur[0] == null ? "" : cur[0];
+        }
         if (target.isEmpty()) return error("no current url, pass url param");
         final String fTarget = target;
         final String[] cookie = new String[1];
