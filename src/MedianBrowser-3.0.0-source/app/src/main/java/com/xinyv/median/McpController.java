@@ -52,6 +52,7 @@ public final class McpController {
         void newTab(String url);     // 新建标签并激活
         void closeCurrentTab();      // 关闭当前标签
         void switchTab(int index);   // 切换标签
+        int currentTabIndex();       // 当前激活标签索引
         JSONObject settingsSnapshot();   // 浏览器设置快照（夜间/拦截/性能/引擎/UA）
         String applySetting(String key, String value); // 修改设置，null=成功
         void addBookmark(String url, String title);    // 添加书签（已存在则忽略）
@@ -92,6 +93,7 @@ public final class McpController {
     public Object dataStore() { return bindings == null ? null : bindings.dataStore(); }
     public boolean privateMode() { return bindings != null && bindings.isPrivateMode(); }
     public List<?> liveTabs() { return bindings == null ? null : bindings.liveTabs(); }
+    public int currentTabIndex() { return bindings == null ? -1 : bindings.currentTabIndex(); }
     public void newTab(String url) { if (bindings != null) bindings.newTab(url); }
     public void closeCurrentTab() { if (bindings != null) bindings.closeCurrentTab(); }
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }

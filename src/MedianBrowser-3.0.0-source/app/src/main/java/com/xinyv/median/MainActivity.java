@@ -306,7 +306,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
     }
 
-    private static final class BrowserTab {
+    static final class BrowserTab {
         String title = "新标签页";
         String url = HOME_URL;
         Bundle state;
@@ -5291,6 +5291,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     // ==================== MCP UiBindings 实现 ====================
     @Override public WebView currentWebView() { return webView; }
     @Override public List<?> liveTabs() { return tabs; }
+    @Override public int currentTabIndex() { return currentTabIndex; }
     @Override public Object dataStore() { return dataStore; }
     @Override public boolean isPrivateMode() { return false; }
     @Override public String applySetting(String key, String value) {

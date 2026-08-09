@@ -625,17 +625,26 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject tabs() throws Exception {
         List<?> list = ctl.liveTabs();
         if (list == null) return error("tabs not ready");
+        int cur = ctl.currentTabIndex();
         JSONArray arr = new JSONArray();
         for (int i = 0; i < list.size(); i++) {
             Object item = list.get(i);
-            if (item instanceof JSONObject) {
+            if (item instanceof MainActivity.BrowserTab) {
+                MainActivity.BrowserTab t = (MainActivity.BrowserTab) item;
+                arr.put(new JSONObject()
+                        .put("id", i)
+                        .put("title", t.title == null ? "" : t.title)
+                        .put("url", t.url == null ? "" : t.url)
+                        .put("pinned", t.pinned)
+                        .put("active", i == cur));
+            } else if (item instanceof JSONObject) {
                 JSONObject t = (JSONObject) item;
                 arr.put(new JSONObject()
                         .put("id", i)
                         .put("title", t.optString("title", ""))
                         .put("url", t.optString("url", ""))
                         .put("pinned", t.optBoolean("pinned", false))
-                        .put("active", t.optBoolean("active", false)));
+                        .put("active", i == cur));
             }
         }
         return new JSONObject().put("count", arr.length()).put("tabs", arr);
