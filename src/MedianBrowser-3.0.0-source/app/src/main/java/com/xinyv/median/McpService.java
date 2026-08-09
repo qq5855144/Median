@@ -237,6 +237,7 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_eval", "在当前页面执行 JavaScript 并返回结果", schema(
                 new JSONObject().put("expression", prop("string", "要执行的 JS 表达式或语句")), new String[]{"expression"})));
         tools.put(tool("browser_dom", "提取当前页面结构化内容（标题、URL、正文文本、链接、可交互元素）", schema(null, null)));
+        tools.put(tool("browser_interactive", "获取页面全部可交互元素（链接/按钮/输入框/下拉框，含唯一 selector 与屏幕坐标，可直接用于 browser_click / browser_type）", schema(null, null)));
         tools.put(tool("browser_text", "提取当前页面可见文本", schema(null, null)));
         tools.put(tool("browser_links", "列出当前页面全部链接（href + 文本）", schema(null, null)));
         tools.put(tool("browser_source", "获取当前页面 HTML 源码（限制长度）", schema(
