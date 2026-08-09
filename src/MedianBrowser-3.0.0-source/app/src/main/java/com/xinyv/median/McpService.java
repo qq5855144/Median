@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
@@ -55,7 +56,8 @@ public final class McpService implements MiniHttpServer.Handler {
             return MiniHttpServer.Response.unauthorized();
         }
         if ("/api/".equals(cleanPath) || cleanPath.startsWith("/api/")) {
-            return handleBridge(method, cleanPath, body);
+            // 传原始 path（含 query），由 handleBridgeInner 解析 query 参数
+            return handleBridge(method, path, body);
         }
         if ("/mcp".equals(cleanPath) || "/".equals(cleanPath)) {
             return handleMcp(method, headers, body);
@@ -215,7 +217,11 @@ public final class McpService implements MiniHttpServer.Handler {
     private static JSONObject schema(JSONObject properties, String[] required) throws Exception {
         JSONObject s = new JSONObject().put("type", "object")
                 .put("properties", properties == null ? new JSONObject() : properties);
-        if (required != null && required.length > 0) s.put("required", new JSONArray().put(required[0]));
+        if (required != null && required.length > 0) {
+            JSONArray req = new JSONArray();
+            for (String r : required) req.put(r);
+            s.put("required", req);
+        }
         return s;
     }
 
@@ -462,8 +468,9 @@ public final class McpService implements MiniHttpServer.Handler {
                 + "return JSON.stringify({ok:true,x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),"
                 + "tag:el.tagName.toLowerCase(),text:(el.innerText||el.value||'').trim().slice(0,80)})})()";
         String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
         Object decoded = decodeEvalValue(raw);
-        if (!(decoded instanceof JSONObject)) return error("TIMEOUT_OR_NO_PAGE");
+        if (!(decoded instanceof JSONObject)) return error("unexpected click result");
         JSONObject info = (JSONObject) decoded;
         if (!info.optBoolean("ok", false)) return error(info.optString("error", "click failed"));
         return tapAt(wv, info.optInt("x", 0), info.optInt("y", 0), info);
@@ -515,8 +522,9 @@ public final class McpService implements MiniHttpServer.Handler {
                 + "el.dispatchEvent(new Event('change',{bubbles:true}));"
                 + "return JSON.stringify({ok:true,tag:el.tagName.toLowerCase(),value:el.value.slice(0,100)})})()";
         String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
         Object decoded = decodeEvalValue(raw);
-        if (!(decoded instanceof JSONObject)) return error("TIMEOUT_OR_NO_PAGE");
+        if (!(decoded instanceof JSONObject)) return error("unexpected type result");
         JSONObject info = (JSONObject) decoded;
         if (!info.optBoolean("ok", false)) return error(info.optString("error", "type failed"));
         return new JSONObject().put("ok", true).put("typed", text.length()).put("target", info);
@@ -529,8 +537,9 @@ public final class McpService implements MiniHttpServer.Handler {
         final WebView wv = requireWebView();
         String script = buildKeyScript(keys);
         String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
         Object decoded = decodeEvalValue(raw);
-        if (!(decoded instanceof JSONObject)) return error("TIMEOUT_OR_NO_PAGE");
+        if (!(decoded instanceof JSONObject)) return error("unexpected keyboard result");
         JSONObject info = (JSONObject) decoded;
         if (!info.optBoolean("ok", false)) return error(info.optString("error", "keyboard failed"));
         return new JSONObject().put("ok", true).put("pressed", keys);
@@ -877,6 +886,7 @@ public final class McpService implements MiniHttpServer.Handler {
                 if (eq > 0) {
                     String k = pair.substring(0, eq);
                     String v = pair.substring(eq + 1);
+                    try { v = URLDecoder.decode(v, "UTF-8"); } catch (Exception ignored) { }
                     if (!args.has(k)) args.put(k, v);
                 }
             }
@@ -912,7 +922,12 @@ public final class McpService implements MiniHttpServer.Handler {
         return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
-    /** evaluateJavascript 返回值是 JSON 编码的字符串，这里解码为 Java 对象。 */
+    /**
+     * evaluateJavascript 返回值是 JSON 编码的字符串，这里解码为 Java 对象。
+     * 注意：evaluateJavascript 会对 JS 返回值做 JSON 编码——若脚本返回对象，回调为 {"a":1}；
+     * 若脚本返回字符串（如 JSON.stringify 的结果），回调会变成带引号与转义的字符串字面量
+     * （双重编码）。此处对字符串结果再做一次 JSON 解析以还原对象/数组，兼容两种写法。
+     */
     private static Object decodeEvalValue(String raw) {
         if (raw == null) return null;
         try {
@@ -920,6 +935,15 @@ public final class McpService implements MiniHttpServer.Handler {
             if (value instanceof String) {
                 String s = (String) value;
                 if ("undefined".equals(s) || "null".equals(s) || "NaN".equals(s)) return null;
+                String t = s.trim();
+                // 字符串内容本身是 JSON 结构（脚本用 JSON.stringify 包装的返回值）→ 二次解析还原
+                if (t.startsWith("{") || t.startsWith("[")) {
+                    try {
+                        Object inner = new org.json.JSONTokener(s).nextValue();
+                        if (inner != null && !(inner instanceof String)) return inner;
+                    } catch (Exception ignored) { }
+                }
+                return s;
             }
             return value;
         } catch (Exception e) {
