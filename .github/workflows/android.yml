@@ -1,0 +1,67 @@
+name: Android CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src/MedianBrowser-3.0.0-source
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Ensure Android SDK 36 (platform + build-tools)
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          if [ -n "$ANDROID_HOME" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            [ -x "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            if [ -x "$SDKMANAGER" ]; then
+              yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+              "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
+            fi
+          fi
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+
+      - name: Static security & sanity checks
+        run: ./tools/static_checks.sh
+
+      - name: Lint, unit tests and build (debug APK + release APK/AAB)
+        run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
+
+      - name: Collect artifacts & checksums
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/MedianBrowser-3.0.0-debug.apk
+          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk artifacts/MedianBrowser-3.0.0-release-unsigned.apk
+          fi
+          cp app/build/outputs/bundle/release/app-release.aab artifacts/MedianBrowser-3.0.0-release.aab
+          cp app/build/reports/lint-results-debug.html artifacts/ 2>/dev/null || true
+          (cd artifacts && sha256sum * | tee SHA256SUMS.txt)
+          echo '===== APK/AAB sizes ====='
+          ls -lh artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: median-${{ github.sha }}-apk
+          if-no-files-found: error
+          path: |
+            src/MedianBrowser-3.0.0-source/artifacts/

@@ -767,7 +767,6 @@ public final class McpService implements MiniHttpServer.Handler {
             int timeout = Math.max(1000, Math.min(args.optInt("timeoutMs", 10000), 30000));
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
-            conn.setInstanceFollowRedirects(true);
             conn.setRequestProperty("User-Agent", "Median/" + VERSION);
             conn.setRequestProperty("Accept", "*/*");
             JSONObject headers = args.optJSONObject("headers");
