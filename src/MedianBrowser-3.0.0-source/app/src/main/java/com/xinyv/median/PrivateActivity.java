@@ -100,6 +100,12 @@ public final class PrivateActivity extends Activity {
 
     private static synchronized boolean ensurePrivateDataDirectory() {
         if (privateDataDirectoryConfigured) return true;
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            // setDataDirectorySuffix requires API 28; on 26/27 fall back to the
+            // default profile (private isolation is best-effort there).
+            privateDataDirectoryConfigured = true;
+            return true;
+        }
         try {
             WebView.setDataDirectorySuffix("median_private");
             privateDataDirectoryConfigured = true;

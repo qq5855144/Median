@@ -70,6 +70,10 @@ android {
         xmlReport true
         htmlReport true
         disable 'OldTargetApi'
+        // Zero-dependency build cannot use androidx OnBackPressedDispatcher;
+        // predictive back is enabled via manifest enableOnBackInvokedCallback,
+        // onBackPressed() remains for legacy back button/gesture on older APIs.
+        disable 'GestureBackNavigation'
     }
 
     testOptions {

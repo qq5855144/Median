@@ -503,6 +503,7 @@ public final class AdaptiveDownloadService extends Service {
     }
 
     private Uri publishToMediaStore(Task task, File temp, Control control) throws Exception {
+        if (Build.VERSION.SDK_INT < 29) throw new IllegalStateException("MediaStore.Downloads requires API 29");
         ContentResolver resolver = getContentResolver();
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, task.filename);
