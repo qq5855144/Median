@@ -249,10 +249,10 @@ public final class McpService implements MiniHttpServer.Handler {
                 new JSONObject().put("selector", prop("string", "CSS 选择器")), new String[]{"selector"})));
         tools.put(tool("browser_click_at", "按屏幕坐标点击（x, y 为像素，可用 browser_interactive 获取）", schema(
                 new JSONObject().put("x", prop("number", "横坐标")).put("y", prop("number", "纵坐标")),
-                new String[]{"x"})));
+                new String[]{"x", "y"})));
         tools.put(tool("browser_type", "向输入框输入文本（先聚焦再填值，触发 input/change 事件）", schema(
                 new JSONObject().put("selector", prop("string", "CSS 选择器")).put("text", prop("string", "要输入的文本")),
-                new String[]{"selector"})));
+                new String[]{"selector", "text"})));
         tools.put(tool("browser_keyboard", "模拟按键（Enter/Backspace/Tab/Escape 或普通字符）", schema(
                 new JSONObject().put("keys", prop("string", "按键序列，如 Enter、Tab")), new String[]{"keys"})));
         tools.put(tool("browser_tabs", "列出全部标签页（标题、URL、是否激活）", schema(null, null)));
@@ -722,12 +722,15 @@ public final class McpService implements MiniHttpServer.Handler {
                 .put("tabs", state.optInt("tabCount", 0));
     }
 
-    /** 查找可点击元素（隐藏别名，供 AI 获取坐标）。 */
+    /** 查找可点击元素（隐藏别名，供 AI 获取坐标）。脚本返回 JSON 数组，包装为 {count, items}。 */
     private JSONObject interactive() throws Exception {
         final WebView wv = requireWebView();
         String raw = ctl.evalJs(wv, PAGE_INTERACTIVE_JS, 6000);
         if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
         Object decoded = decodeEvalValue(raw);
+        if (decoded instanceof JSONArray) {
+            return new JSONObject().put("count", ((JSONArray) decoded).length()).put("items", decoded);
+        }
         if (!(decoded instanceof JSONObject)) return error("unexpected interactive result");
         return (JSONObject) decoded;
     }
@@ -865,6 +868,8 @@ public final class McpService implements MiniHttpServer.Handler {
 
     private MiniHttpServer.Response handleBridgeInner(String method, String path, byte[] body) throws Exception {
         String tool = path;
+        int qq = tool.indexOf('?');
+        if (qq >= 0) tool = tool.substring(0, qq); // 工具名不含 query（query 作为参数在下方解析）
         if (tool.startsWith("/api/")) tool = tool.substring(5);
         if (tool.endsWith("/")) tool = tool.substring(0, tool.length() - 1);
         if (tool.isEmpty()) {
