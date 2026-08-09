@@ -1,9 +1,6 @@
 package com.xinyv.median;
 
-import android.os.SystemClock;
-import android.view.MotionEvent;
 import android.webkit.WebView;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -486,22 +483,26 @@ public final class McpService implements MiniHttpServer.Handler {
     }
 
     private JSONObject tapAt(final WebView wv, final int x, final int y, final JSONObject info) throws Exception {
-        Boolean done = ctl.onUi(new McpController.BlockingCall<Boolean>() {
-            @Override public Boolean run() {
-                long now = SystemClock.uptimeMillis();
-                MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
-                wv.dispatchTouchEvent(down);
-                down.recycle();
-                try { Thread.sleep(60); } catch (InterruptedException ignored) { }
-                long now2 = SystemClock.uptimeMillis();
-                MotionEvent up = MotionEvent.obtain(now2, now2, MotionEvent.ACTION_UP, x, y, 0);
-                wv.dispatchTouchEvent(up);
-                up.recycle();
-                return true;
-            }
-        }, 3000);
-        if (done == null || !done) return error("tap failed");
-        JSONObject out = new JSONObject().put("ok", true).put("x", x).put("y", y);
+        // 实测结论：Chromium WebView 不处理外部合成的 MotionEvent（dispatchTouchEvent 无效，
+        // 页面监听器不触发、链接不导航）；JS 派发 pointer/mouse 完整序列可正常触发
+        // 监听器、默认行为与真实导航。故改为 JS 定位 + JS 事件序列派发。
+        String script = "(function(){var el=document.elementFromPoint(" + x + "," + y + ");"
+                + "if(!el)return JSON.stringify({ok:false,error:'no element at point'});"
+                + "var opts={bubbles:true,cancelable:true,view:window,clientX:" + x + ",clientY:" + y + ",button:0,buttons:1};"
+                + "function fire(t,ctor,extra){try{el.dispatchEvent(new ctor(t,Object.assign({},opts,extra)));}"
+                + "catch(e){try{el.dispatchEvent(new MouseEvent(t,opts));}catch(e2){}}}"
+                + "fire('pointerdown',PointerEvent,{pointerId:1,pointerType:'touch',isPrimary:true});"
+                + "fire('mousedown',MouseEvent,{});"
+                + "fire('pointerup',PointerEvent,{pointerId:1,pointerType:'touch',isPrimary:true});"
+                + "fire('mouseup',MouseEvent,{});"
+                + "fire('click',MouseEvent,{});"
+                + "return JSON.stringify({ok:true,tag:el.tagName.toLowerCase(),x:" + x + ",y:" + y + "})})()";
+        String raw = ctl.evalJs(wv, script, 5000);
+        if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
+        Object decoded = decodeEvalValue(raw);
+        if (!(decoded instanceof JSONObject)) return error("unexpected tap result");
+        JSONObject out = (JSONObject) decoded;
+        if (!out.optBoolean("ok", false)) return error(out.optString("error", "tap failed"));
         if (info != null) out.put("target", info);
         return out;
     }
