@@ -54,6 +54,19 @@ jobs:
       - name: Static security & sanity checks
         run: ./tools/static_checks.sh
 
+      - name: Lint (report even on failure)
+        id: lint
+        continue-on-error: true
+        run: ./gradlew --no-daemon lintDebug || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lint-report-${{ github.sha }}
+          if-no-files-found: ignore
+          path: |
+            src/MedianBrowser-3.0.0-source/app/build/reports/
+            src/MedianBrowser-3.0.0-source/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/
+
       - name: Lint, unit tests and build (debug APK + release APK/AAB)
         run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
 
