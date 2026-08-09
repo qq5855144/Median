@@ -12,6 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     defaults:
       run:
         working-directory: src/MedianBrowser-3.0.0-source
@@ -26,19 +29,27 @@ jobs:
           gradle-version: '8.13'
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
+      - name: Install ripgrep (required by static_checks.sh)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
       - name: Ensure Android SDK 36 (platform + build-tools)
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
-          if [ -n "$ANDROID_HOME" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-            [ -x "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-            if [ -x "$SDKMANAGER" ]; then
-              yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-              "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
-            fi
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME" 2>/dev/null | head -10 || true
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            for cand in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+              [ -x "$cand" ] && SDKMANAGER="$cand" && break
+            done
           fi
-          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
+            echo "SDK36 ready: $(ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' ')"
+          else
+            echo "sdkmanager not found under $ANDROID_HOME"
+            find "$ANDROID_HOME" -maxdepth 3 -name sdkmanager 2>/dev/null || true
+          fi
 
       - name: Static security & sanity checks
         run: ./tools/static_checks.sh

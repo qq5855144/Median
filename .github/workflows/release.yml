@@ -15,6 +15,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     defaults:
       run:
         working-directory: src/MedianBrowser-3.0.0-source
@@ -31,9 +34,14 @@ jobs:
       - name: Ensure Android SDK 36 (platform + build-tools)
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            for cand in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+              [ -x "$cand" ] && SDKMANAGER="$cand" && break
+            done
+          fi
           if [ -x "$SDKMANAGER" ]; then
             yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-            "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
+            "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
           fi
 
       - name: Verify tag and app version
