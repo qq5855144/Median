@@ -768,7 +768,13 @@ public final class McpService implements MiniHttpServer.Handler {
         JSONArray issues = new JSONArray();
         if (errCount > 0) issues.put("console errors: " + errCount);
         JSONArray failArr = net.optJSONArray("failures");
-        int failCount = failArr == null ? 0 : failArr.length();
+        int failCount = 0;
+        if (failArr != null) {
+            for (int i = 0; i < failArr.length(); i++) {
+                JSONObject f = failArr.optJSONObject(i);
+                if (f != null && f.optInt("status", 0) >= 400) failCount++;  // 仅确认失败（4xx/5xx）计入健康判定
+            }
+        }
         if (failCount > 0) issues.put("failed/4xx/5xx requests: " + failCount);
         JSONObject timing = perf.optJSONObject("timing");
         if (timing != null) {
