@@ -3,8 +3,13 @@ plugins {
 }
 
 
-// ---- 动态版本号：基于 git commit 数递增，每次构建可区分且可覆盖安装 ----
-def gitCommitCount = { ->
+// ---- 动态版本号：优先 CI 构建号（GitHub Actions run_number，全局递增）；
+// 本地构建 fallback 到 git commit 数。每次构建 versionCode/versionName 必然递增，可区分且可覆盖安装 ----
+def buildNumber = { ->
+    String env = System.getenv('MEDIAN_BUILD_NUMBER')
+    if (env != null && env.isInteger()) {
+        return env.toInteger()
+    }
     try {
         def p = 'git rev-list --count HEAD'.execute(null, rootProject.projectDir)
         p.waitFor()
@@ -14,8 +19,8 @@ def gitCommitCount = { ->
         return 0
     }
 }
-final int medianVersionCode = 100 + gitCommitCount()
-final String medianVersionName = "3.0.${gitCommitCount()}"
+final int medianVersionCode = 1000 + buildNumber()
+final String medianVersionName = "3.0.${buildNumber()}"
 
 android {
     namespace 'com.xinyv.median'

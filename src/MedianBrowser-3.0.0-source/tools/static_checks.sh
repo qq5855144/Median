@@ -20,9 +20,9 @@ if rg -n 'median-debug|STOREPASS:-android|versionName=.1\.3\.|Median Browser 1\.
   echo 'Stale release/debug metadata found.' >&2
   exit 1
 fi
-rg -q 'gitCommitCount' app/build.gradle
-rg -qF 'medianVersionCode = 100 + gitCommitCount()' app/build.gradle
-rg -qF 'medianVersionName = "3.0.${gitCommitCount()}"' app/build.gradle
+rg -q 'buildNumber' app/build.gradle
+rg -qF 'medianVersionCode = 1000 + buildNumber()' app/build.gradle
+rg -qF 'medianVersionName = "3.0.${buildNumber()}"' app/build.gradle
 rg -q "applicationId 'com.xinyv.median.compat'" app/build.gradle
 rg -q 'targetSdk 36' app/build.gradle
 if rg -n '^[[:space:]]*implementation[[:space:]]' app/build.gradle; then
