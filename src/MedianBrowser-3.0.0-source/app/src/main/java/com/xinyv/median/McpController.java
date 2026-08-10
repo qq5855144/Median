@@ -39,6 +39,10 @@ public final class McpController {
     private static final String KEY_PORT = "mcp_port";
     private static final String KEY_LAN = "mcp_lan_enabled";
     private static final String KEY_ENABLED = "mcp_enabled";
+    private static final String KEY_PROXY = "mcp_proxy_enabled";
+    private static final String KEY_LLM_ENDPOINT = "mcp_llm_endpoint";
+    private static final String KEY_LLM_MODEL = "mcp_llm_model";
+    private static final String KEY_LLM_KEY = "mcp_llm_key";
     private static final int DEFAULT_PORT = 8788;
     private static final int MAX_CONSOLE = 500;
     private static final int MAX_NETWORK = 400;
@@ -70,9 +74,11 @@ public final class McpController {
     private volatile UiBindings bindings;
     private volatile MiniHttpServer server;
     private volatile McpService service;
+    private volatile MitmProxy mitm;
     private volatile String token;
     private volatile int port = DEFAULT_PORT;
     private volatile String lanHost;
+    private volatile android.content.Context appContext;
 
     private McpController() { }
 
@@ -131,6 +137,7 @@ public final class McpController {
     }
     public synchronized void start(Context context) {
         Context app = context.getApplicationContext();
+        appContext = app;
         SharedPreferences prefs = prefs(app);
         token = prefs.getString(KEY_TOKEN, null);
         if (token == null || token.length() < 24) {
@@ -142,6 +149,8 @@ public final class McpController {
         lanHost = prefs.getBoolean(KEY_LAN, false) ? "0.0.0.0" : "127.0.0.1";
         int preferred = prefs.getInt(KEY_PORT, DEFAULT_PORT);
         if (preferred < 1 || preferred > 65535) preferred = DEFAULT_PORT;
+        if (mitm == null) mitm = new MitmProxy(app.getFilesDir());
+        mitm.setEnabled(prefs.getBoolean(KEY_PROXY, false));
         if (server != null && service != null && port == preferred) return;
         stopLocked();
         int bound = bind(preferred, app);
@@ -155,7 +164,13 @@ public final class McpController {
         for (int p = preferred; p < preferred + 12; p++) {
             try {
                 McpService s = new McpService(this, token);
-                MiniHttpServer srv = new MiniHttpServer(lanHost, p, s);
+                final MitmProxy proxy = mitm;
+                MiniHttpServer srv = new MiniHttpServer(lanHost, p, s,
+                        new MiniHttpServer.ConnectHandler() {
+                            @Override public boolean handleConnect(String hostPort, java.net.Socket socket) {
+                                return proxy != null && proxy.isEnabled() && proxy.handleConnect(hostPort, socket);
+                            }
+                        });
                 srv.start();
                 service = s;
                 server = srv;
@@ -185,6 +200,7 @@ public final class McpController {
     public int port() { return port; }
     public String token() { return token; }
     public String listenHost() { return lanHost; }
+    public android.content.Context context() { return appContext; }
 
     /** 局域网开关：true=0.0.0.0，false=仅本机。 */
     public void setLanEnabled(Context context, boolean enabled) {
@@ -263,6 +279,68 @@ public final class McpController {
         synchronized (networkLogs) { return new ArrayList<JSONObject>(networkLogs); }
     }
     public void clearNetwork() { synchronized (networkLogs) { networkLogs.clear(); } }
+
+    // ==================== MITM 代理（v2） ====================
+    /** 开启/关闭 MITM 代理，返回是否成功。 */
+    public synchronized boolean proxySet(Context context, boolean on) {
+        if (mitm == null) mitm = new MitmProxy(context.getApplicationContext().getFilesDir());
+        boolean ok = mitm.ensureCa();
+        mitm.setEnabled(on);
+        prefs(context.getApplicationContext()).edit().putBoolean(KEY_PROXY, on).apply();
+        recordRunLog("info", "proxy", on ? "MITM proxy enabled" : "MITM proxy disabled");
+        return ok;
+    }
+    public MitmProxy proxy() { return mitm; }
+
+    // ==================== 响应体捕获 ====================
+    /** 将网络规则 fetch 路径拉到的响应体快照回填到最后一条匹配 url 的网络记录。 */
+    public void attachNetworkBody(String url, int status, String mimeType, long size, String bodySnippet) {
+        if (url == null) return;
+        synchronized (networkLogs) {
+            for (int i = networkLogs.size() - 1; i >= 0; i--) {
+                JSONObject e = networkLogs.get(i);
+                if (url.equals(e.optString("url"))) {
+                    try {
+                        e.put("status", status);
+                        e.put("mimeType", mimeType == null ? "" : mimeType);
+                        e.put("size", size);
+                        if (bodySnippet != null) e.put("body", bodySnippet);
+                    } catch (Exception ignored) { }
+                    break;
+                }
+            }
+        }
+    }
+
+    // ==================== 外部 LLM 配置（AI 分析增强） ====================
+    /** 读取 LLM 配置（apiKey 打码）。 */
+    public JSONObject llmConfig(Context context) {
+        SharedPreferences p = prefs(context.getApplicationContext());
+        JSONObject o = new JSONObject();
+        try {
+            String key = p.getString(KEY_LLM_KEY, "");
+            o.put("enabled", !key.isEmpty());
+            o.put("endpoint", p.getString(KEY_LLM_ENDPOINT, "https://api.openai.com/v1/chat/completions"));
+            o.put("model", p.getString(KEY_LLM_MODEL, "gpt-4o-mini"));
+            o.put("apiKey", key.isEmpty() ? "" : key.substring(0, Math.min(6, key.length())) + "***");
+        } catch (Exception ignored) { }
+        return o;
+    }
+    /** 写入 LLM 配置。apiKey 传 "clear" 清除；传 null/空 表示保留原值。 */
+    public void llmSet(Context context, String endpoint, String model, String apiKey) {
+        SharedPreferences.Editor ed = prefs(context.getApplicationContext()).edit();
+        if (endpoint != null && !endpoint.trim().isEmpty()) ed.putString(KEY_LLM_ENDPOINT, endpoint.trim());
+        if (model != null && !model.trim().isEmpty()) ed.putString(KEY_LLM_MODEL, model.trim());
+        if (apiKey != null) {
+            String k = apiKey.trim();
+            if ("clear".equals(k)) ed.remove(KEY_LLM_KEY);
+            else if (!k.isEmpty()) ed.putString(KEY_LLM_KEY, k);
+        }
+        ed.apply();
+    }
+    public void llmClearKey(Context context) {
+        prefs(context.getApplicationContext()).edit().remove(KEY_LLM_KEY).apply();
+    }
 
     // ==================== 网络规则引擎（block / redirect / inject / replace） ====================
     /** 网络拦截/重写/注入规则。 */

@@ -1921,7 +1921,10 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if ("block".equals(rule.type)) {
             return blockedResponse();
         } else if ("redirect".equals(rule.type)) {
-            return fetchRemote(rule.target);
+            Fetched f = fetchRemoteBytes(rule.target);
+            if (f == null) return null;
+            attachBody(url, f);
+            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
         } else if (mainFrame && "inject".equals(rule.type)) {
             return fetchTransform(url, rule.target, null, true);
         } else if (mainFrame && "replace".equals(rule.type)) {
@@ -1931,8 +1934,29 @@ public final class MainActivity extends Activity implements McpController.UiBind
         return null;
     }
 
-    /** 用 HttpURLConnection 拉取远程内容并包装为 WebResourceResponse（零依赖，IO 线程调用）。 */
-    private WebResourceResponse fetchRemote(String url) {
+    /** 拉取结果容器（mime/charset/body/status）。 */
+    private static final class Fetched {
+        final int status;
+        final String mime;
+        final String charset;
+        final byte[] body;
+        Fetched(int s, String m, String c, byte[] b) { status = s; mime = m; charset = c; body = b; }
+    }
+
+    /** 将拉取结果回填到 MCP 网络记录（响应体快照，最多 4KB）。 */
+    private void attachBody(String url, Fetched f) {
+        if (f == null) return;
+        String snippet = null;
+        if (f.body != null) {
+            int len = Math.min(f.body.length, 4096);
+            snippet = new String(f.body, 0, len, StandardCharsets.UTF_8);
+            if (f.body.length > len) snippet += "...";
+        }
+        McpController.get().attachNetworkBody(url, f.status, f.mime, f.body == null ? 0 : f.body.length, snippet);
+    }
+
+    /** 用 HttpURLConnection 拉取远程内容（零依赖，IO 线程调用）。 */
+    private Fetched fetchRemoteBytes(String url) {
         if (url == null || url.isEmpty()) return null;
         HttpURLConnection conn = null;
         try {
@@ -1949,12 +1973,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     String loc = conn.getHeaderField("Location");
                     conn.disconnect();
                     conn = null;
-                    if (loc == null || loc.isEmpty()) return blockedResponse();
+                    if (loc == null || loc.isEmpty()) return null;
                     cur = new URL(new URL(cur), loc).toString();
                     hops++;
                     continue;
                 }
-                if (code < 200 || code >= 400) { conn.disconnect(); conn = null; return blockedResponse(); }
+                if (code < 200 || code >= 400) { conn.disconnect(); conn = null; return null; }
                 break;
             }
             String contentType = conn.getContentType();
@@ -1974,31 +1998,34 @@ public final class MainActivity extends Activity implements McpController.UiBind
             int n, total = 0, MAX = 8 * 1024 * 1024;
             while ((n = in.read(buf)) > 0 && total < MAX) { bos.write(buf, 0, n); total += n; }
             in.close();
+            int status = conn.getResponseCode();
             conn.disconnect();
             conn = null;
-            return new WebResourceResponse(mime, charset, new ByteArrayInputStream(bos.toByteArray()));
+            return new Fetched(status, mime, charset, bos.toByteArray());
         } catch (Exception e) {
             if (conn != null) try { conn.disconnect(); } catch (RuntimeException ignored) {}
             return null;
         }
     }
 
+    /** 兼容包装：拉取并返回 WebResourceResponse。 */
+    private WebResourceResponse fetchRemote(String url) {
+        Fetched f = fetchRemoteBytes(url);
+        if (f == null) return null;
+        return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
+    }
+
     /** 拉取原始响应并变换：injectMode=true 时在 </head> 前插入 target；否则把 pattern 替换为 target。 */
     private WebResourceResponse fetchTransform(String url, String target, String pattern, boolean injectMode) {
-        WebResourceResponse resp = fetchRemote(url);
-        if (resp == null) return null;
-        String mime = resp.getMimeType();
-        if (mime == null || !mime.toLowerCase(Locale.ROOT).contains("html")) return resp;
+        Fetched f = fetchRemoteBytes(url);
+        if (f == null) return null;
+        String mime = f.mime;
+        if (mime == null || !mime.toLowerCase(Locale.ROOT).contains("html")) {
+            attachBody(url, f);
+            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
+        }
         try {
-            String charset = resp.getEncoding();
-            if (charset == null || charset.isEmpty()) charset = "UTF-8";
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            java.io.InputStream in = resp.getData();
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
-            in.close();
-            String html = new String(bos.toByteArray(), charset);
+            String html = new String(f.body, f.charset);
             String out;
             if (injectMode) {
                 String lower = html.toLowerCase(Locale.ROOT);
@@ -2009,9 +2036,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 if (pattern == null || pattern.isEmpty()) out = html;
                 else out = html.replace(pattern, target == null ? "" : target);
             }
-            return new WebResourceResponse(mime, charset, new ByteArrayInputStream(out.getBytes(charset)));
+            byte[] outBytes = out.getBytes(f.charset);
+            attachBody(url, new Fetched(f.status, f.mime, f.charset, outBytes));
+            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(outBytes));
         } catch (Exception e) {
-            return resp;
+            attachBody(url, f);
+            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
         }
     }
 

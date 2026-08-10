@@ -263,7 +263,8 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_reload", "刷新当前页面（主页时重新加载主页）", schema(null, null)));
         tools.put(tool("browser_home", "返回浏览器主页（Median 主页）", schema(null, null)));
         tools.put(tool("browser_console", "读取页面 Console 日志（error/warn/log 等）", schema(null, null)));
-        tools.put(tool("browser_network", "读取页面网络请求记录（URL、类型、主框架、时间）与资源性能条目", schema(null, null)));
+        tools.put(tool("browser_network", "读取页面网络请求记录（URL、方法、主框架、时间、状态/响应体快照），body=true 时附带响应体", schema(
+                new JSONObject().put("body", prop("boolean", "true 时返回已捕获的响应体快照（网络规则拉取路径）")), null)));
         tools.put(tool("net_rule_add", "添加网络规则：block=拦截请求返回空响应; redirect=将请求重写到目标URL; inject=在主框架HTML的</head>前注入片段; replace=替换主框架HTML中的文本", schema(
                 new JSONObject().put("type", prop("string", "block|redirect|inject|replace"))
                         .put("pattern", prop("string", "URL 子串（不区分大小写）"))
@@ -275,8 +276,9 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("net_rule_remove", "按 id 删除网络规则", schema(
                 new JSONObject().put("id", prop("string", "规则 id（net_rule_list 获取）")), new String[]{"id"})));
         tools.put(tool("net_rule_clear", "清空全部网络规则", schema(null, null)));
-        tools.put(tool("browser_har", "导出抓包数据为 HAR 1.2 标准格式（entries: 请求URL/方法/时间）", schema(
-                new JSONObject().put("limit", prop("number", "最多导出条数，默认 200")), null)));
+        tools.put(tool("browser_har", "导出抓包数据为 HAR 1.2 标准格式（entries: 请求URL/方法/时间/状态/响应体），save=true 时落盘到 Download/Median/", schema(
+                new JSONObject().put("limit", prop("number", "最多导出条数，默认 200"))
+                        .put("save", prop("boolean", "true 时保存 HAR 文件到 Download/Median/ 并返回路径")), null)));
         tools.put(tool("browser_hook", "管理持久 JS 钩子（页面加载后自动注入，可 hook fetch/XHR/console 等）：action=get 列出；action=add 添加脚本；action=remove 删除；action=clear 清空", schema(
                 new JSONObject().put("action", prop("string", "get|add|remove|clear"))
                         .put("script", prop("string", "JS 钩子代码（action=add 时必填；会被包在 try{}catch 中执行）"))
@@ -286,8 +288,18 @@ public final class McpService implements MiniHttpServer.Handler {
                 new JSONObject().put("action", prop("string", "get 或 set"))
                         .put("level", prop("string", "off/light/full（action=set 时必填）")),
                 new String[]{"action"})));
-        tools.put(tool("browser_packet_analyze", "抓包 AI 启发式分析：汇总请求数/域名分布/方法分布/主框架/敏感路径/可疑外联/时间跨度，供外部 AI 直接消费", schema(
-                new JSONObject().put("limit", prop("number", "参与分析的最近请求数，默认全部")), null)));
+        tools.put(tool("browser_packet_analyze", "抓包 AI 启发式分析：汇总请求数/域名分布/方法分布/主框架/敏感路径/可疑外联/时间跨度；llm=true 时调用外部 LLM（需先 ai_configure）生成深度结论", schema(
+                new JSONObject().put("limit", prop("number", "参与分析的最近请求数，默认全部"))
+                        .put("llm", prop("boolean", "true 时把分析结果发送给已配置的外部 LLM 生成 AI 结论")), null)));
+        tools.put(tool("proxy_ctl", "MITM 代理控制：action=get 查状态/统计/CA指纹；action=on 开启；action=off 关闭；action=export_ca 导出 CA 证书 PEM 到 Download/Median/ 供安装信任", schema(
+                new JSONObject().put("action", prop("string", "get|on|off|export_ca")),
+                new String[]{"action"})));
+        tools.put(tool("ai_configure", "外部 LLM 配置（供 packet_analyze llm=true 使用）：action=get 查配置；action=set 设置 endpoint/model/apiKey（apiKey 传 clear 清除）；action=test 发送测试请求验证连通", schema(
+                new JSONObject().put("action", prop("string", "get|set|test"))
+                        .put("endpoint", prop("string", "OpenAI 兼容 /chat/completions 端点，默认 https://api.openai.com/v1/chat/completions"))
+                        .put("model", prop("string", "模型名，默认 gpt-4o-mini"))
+                        .put("apiKey", prop("string", "API Key（action=set 时可选；clear 清除）")),
+                new String[]{"action"})));
         tools.put(tool("browser_perf", "读取页面性能指标（FCP、DOM 大小、资源数量等）", schema(null, null)));
         tools.put(tool("browser_report", "生成综合诊断报告（页面、Console、Network、性能汇总）", schema(null, null)));
         tools.put(tool("browser_history", "读取浏览历史", schema(null, null)));
@@ -363,7 +375,7 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_reload".equals(name)) return nav("reload");
             if ("browser_home".equals(name)) return nav("home");
             if ("browser_console".equals(name)) return console(args);
-            if ("browser_network".equals(name)) return network();
+            if ("browser_network".equals(name)) return network(args);
             if ("net_rule_add".equals(name)) return netRuleAdd(args);
             if ("net_rule_list".equals(name)) return netRuleList();
             if ("net_rule_remove".equals(name)) return netRuleRemove(args);
@@ -372,6 +384,8 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_hook".equals(name)) return hook(args);
             if ("browser_fingerprint".equals(name)) return fingerprint(args);
             if ("browser_packet_analyze".equals(name)) return packetAnalyze(args);
+            if ("proxy_ctl".equals(name)) return proxyCtl(args);
+            if ("ai_configure".equals(name)) return aiConfigure(args);
             if ("browser_perf".equals(name)) return perf();
             if ("browser_report".equals(name)) return report();
             if ("browser_history".equals(name)) return history(args);
@@ -856,7 +870,48 @@ public final class McpService implements MiniHttpServer.Handler {
         har.put("log", new JSONObject().put("version", "1.2").put("creator",
                 new JSONObject().put("name", "MedianBrowser MCP").put("version", "3.0"))
                 .put("entries", entriesJson(all, from)));
+        if (args.optBoolean("save", false)) {
+            return saveHarFile(har);
+        }
         return har;
+    }
+
+    /** 将 HAR JSON 保存到 Download/Median/（API29+ 用 MediaStore；低版本回退应用目录），返回路径信息。 */
+    private JSONObject saveHarFile(JSONObject har) throws Exception {
+        String fileName = "median-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+                .format(new java.util.Date()) + ".har";
+        byte[] data = har.toString().getBytes(StandardCharsets.UTF_8);
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        String location = "";
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json");
+            values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Download/Median");
+            android.net.Uri uri = ctx.getContentResolver()
+                    .insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri);
+                if (os != null) {
+                    try { os.write(data); } finally { os.close(); }
+                }
+                location = uri.toString();
+            }
+        } else {
+            java.io.File dir = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), "Median");
+            if (!dir.exists()) dir.mkdirs();
+            java.io.File f = new java.io.File(dir, fileName);
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+            try { fos.write(data); } finally { fos.close(); }
+            location = f.getAbsolutePath();
+        }
+        ctl.recordRunLog("info", "har", "saved " + fileName + " -> " + location);
+        return new JSONObject().put("saved", true).put("fileName", fileName)
+                .put("location", location).put("entries", har.optJSONObject("log") == null ? 0
+                        : har.optJSONObject("log").optJSONArray("entries") == null ? 0
+                        : har.optJSONObject("log").optJSONArray("entries").length());
     }
 
     private JSONArray entriesJson(List<JSONObject> logs, int from) throws Exception {
@@ -875,8 +930,14 @@ public final class McpService implements MiniHttpServer.Handler {
             headers.put("mainFrame", e.optBoolean("mainFrame", false));
             req.put("headers", headers);
             entry.put("request", req);
-            entry.put("response", new JSONObject().put("status", 0).put("statusText", "").put("httpVersion", "")
-                    .put("headers", new JSONObject()).put("content", new JSONObject().put("size", 0)).put("mimeType", ""));
+            JSONObject resp = new JSONObject().put("status", e.optInt("status", 0))
+                    .put("statusText", "").put("httpVersion", "")
+                    .put("headers", new JSONObject()).put("mimeType", e.optString("mimeType", ""));
+            JSONObject content = new JSONObject().put("size", e.optLong("size", 0));
+            String body = e.optString("body", "");
+            if (!body.isEmpty()) content.put("text", body);
+            resp.put("content", content);
+            entry.put("response", resp);
             entry.put("cache", new JSONObject());
             entry.put("timings", new JSONObject().put("send", 0).put("wait", 0).put("receive", 0));
             arr.put(entry);
@@ -963,7 +1024,72 @@ public final class McpService implements MiniHttpServer.Handler {
         for (String s : suspicious) susp.put(s);
         out.put("suspiciousUrls", susp);
         out.put("note", "sensitiveUrls=含 login/password/token/auth/api 等敏感路径; suspiciousUrls=可疑外联（IP直连/非常规端口/可疑域名特征），供 AI 分析。");
+        if (args.optBoolean("llm", false)) {
+            JSONObject ai = llmAnalyze(out);
+            out.put("llm", ai);
+        }
         return out;
+    }
+
+    /** 调用已配置的外部 LLM（OpenAI 兼容 /chat/completions）对抓包分析做深度结论。 */
+    private JSONObject llmAnalyze(JSONObject analysis) throws Exception {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences("median_mcp_v1", android.content.Context.MODE_PRIVATE);
+        String endpoint = prefs.getString("mcp_llm_endpoint", "https://api.openai.com/v1/chat/completions");
+        String model = prefs.getString("mcp_llm_model", "gpt-4o-mini");
+        String key = prefs.getString("mcp_llm_key", "");
+        if (key.isEmpty()) {
+            return new JSONObject().put("error", "LLM not configured - use ai_configure action=set first");
+        }
+        String prompt = "你是网络安全与流量分析专家。以下是浏览器抓包的启发式分析数据（JSON），请用中文给出简要结论："
+                + "1) 流量规模与主要域名；2) 存在的敏感请求及风险点；3) 可疑外联行为；4) 改进建议。不要编造数据。\n" + analysis.toString();
+        JSONObject payload = new JSONObject();
+        payload.put("model", model);
+        payload.put("messages", new JSONArray()
+                .put(new JSONObject().put("role", "user").put("content", prompt)));
+        payload.put("temperature", 0.3);
+        payload.put("max_tokens", 800);
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+            conn.setConnectTimeout(12000);
+            conn.setReadTimeout(60000);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + key);
+            conn.setDoOutput(true);
+            byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(body.length);
+            java.io.OutputStream os = conn.getOutputStream();
+            try { os.write(body); } finally { os.close(); }
+            int code = conn.getResponseCode();
+            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            if (in != null) {
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+                in.close();
+            }
+            conn.disconnect();
+            String raw = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            if (code >= 400) {
+                return new JSONObject().put("error", "LLM HTTP " + code + ": " + (raw.length() > 300 ? raw.substring(0, 300) : raw));
+            }
+            JSONObject resp = new JSONObject(raw);
+            JSONArray choices = resp.optJSONArray("choices");
+            if (choices != null && choices.length() > 0) {
+                JSONObject msg = choices.optJSONObject(0);
+                if (msg != null && msg.optJSONObject("message") != null) {
+                    String content = msg.optJSONObject("message").optString("content", "");
+                    return new JSONObject().put("model", model).put("endpoint", endpoint)
+                            .put("conclusion", content).put("status", "ok");
+                }
+            }
+            return new JSONObject().put("error", "unexpected LLM response").put("raw", raw.length() > 300 ? raw.substring(0, 300) : raw);
+        } catch (Exception e) {
+            return new JSONObject().put("error", "LLM call failed: " + e.getMessage());
+        }
     }
 
     private void inc(java.util.Map<String, Integer> m, String k) {
@@ -995,13 +1121,27 @@ public final class McpService implements MiniHttpServer.Handler {
         return low.contains("phpinfo") || low.contains("eval(") || low.contains("base64");
     }
 
-    private JSONObject network() throws Exception {
+    private JSONObject network(JSONObject args) throws Exception {
+        boolean withBody = args != null && args.optBoolean("body", false);
         List<JSONObject> all = ctl.networkSnapshot();
         JSONArray logs = new JSONArray();
         JSONArray failures = new JSONArray();
         for (int i = Math.max(0, all.size() - 100); i < all.size(); i++) {
             JSONObject item = all.get(i);
-            logs.put(item);
+            if (!withBody) {
+                JSONObject slim = new JSONObject();
+                slim.put("url", item.optString("url", ""));
+                slim.put("mainFrame", item.optBoolean("mainFrame", false));
+                slim.put("method", item.optString("method", "GET"));
+                slim.put("time", item.optLong("time"));
+                slim.put("status", item.optInt("status", 0));
+                slim.put("mimeType", item.optString("mimeType", ""));
+                slim.put("size", item.optLong("size", 0));
+                if (item.has("body")) slim.put("hasBody", true);
+                logs.put(slim);
+            } else {
+                logs.put(item);
+            }
             int status = item.optInt("status", 0);
             if (status == 0 || status >= 400) failures.put(item);
         }
@@ -1010,6 +1150,96 @@ public final class McpService implements MiniHttpServer.Handler {
                 .put("shown", logs.length())
                 .put("failures", failures)
                 .put("logs", logs);
+    }
+
+    // ==================== MITM 代理 / LLM 配置 ====================
+
+    /** MITM 代理控制：get / on / off / export_ca。 */
+    private JSONObject proxyCtl(JSONObject args) throws Exception {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        String action = args.optString("action", "get");
+        MitmProxy proxy = ctl.proxy();
+        if (proxy == null) return error("proxy not initialized");
+        if ("on".equals(action)) {
+            boolean ok = ctl.proxySet(ctx, true);
+            return new JSONObject().put("enabled", true).put("caReady", ok)
+                    .put("port", ctl.port()).put("caFingerprint", proxy.caFingerprint());
+        }
+        if ("off".equals(action)) {
+            ctl.proxySet(ctx, false);
+            return new JSONObject().put("enabled", false);
+        }
+        if ("export_ca".equals(action)) {
+            String pem = proxy.caPem();
+            if (pem == null || pem.isEmpty()) return error("CA not ready");
+            String fileName = "median-mitm-ca.crt";
+            String location = writePublicFile(ctx, fileName, "application/x-x509-ca-cert", pem.getBytes(StandardCharsets.UTF_8));
+            if (location == null || location.isEmpty()) return error("failed to write CA file");
+            return new JSONObject().put("exported", true).put("fileName", fileName)
+                    .put("location", location).put("fingerprint", proxy.caFingerprint())
+                    .put("usage", "将证书安装到设备信任库（设置-安全-加密与凭据-安装证书-CA证书），安装后客户端即可信任本代理签发的全部域名证书。");
+        }
+        return new JSONObject().put("enabled", proxy.isEnabled())
+                .put("port", ctl.port())
+                .put("caReady", proxy.caPem() != null && !proxy.caPem().isEmpty())
+                .put("caFingerprint", proxy.caFingerprint())
+                .put("tunnels", proxy.tunnelCount())
+                .put("bytesUp", proxy.bytesUp())
+                .put("bytesDown", proxy.bytesDown());
+    }
+
+    /** 写入公开文件（Download/Median/），返回 location（uri 或路径）。 */
+    private String writePublicFile(android.content.Context ctx, String fileName, String mime, byte[] data) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime);
+                values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Download/Median");
+                android.net.Uri uri = ctx.getContentResolver()
+                        .insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri != null) {
+                    java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri);
+                    if (os != null) {
+                        try { os.write(data); } finally { os.close(); }
+                    }
+                    return uri.toString();
+                }
+                return "";
+            } else {
+                java.io.File dir = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS), "Median");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File f = new java.io.File(dir, fileName);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+                try { fos.write(data); } finally { fos.close(); }
+                return f.getAbsolutePath();
+            }
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 外部 LLM 配置：get / set / test。 */
+    private JSONObject aiConfigure(JSONObject args) throws Exception {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        String action = args.optString("action", "get");
+        if ("set".equals(action)) {
+            String endpoint = args.has("endpoint") ? args.optString("endpoint", "") : null;
+            String model = args.has("model") ? args.optString("model", "") : null;
+            String apiKey = args.has("apiKey") ? args.optString("apiKey", "") : null;
+            ctl.llmSet(ctx, endpoint, model, apiKey);
+            return new JSONObject().put("configured", true).put("config", ctl.llmConfig(ctx));
+        }
+        if ("test".equals(action)) {
+            android.content.SharedPreferences prefs = ctx.getSharedPreferences("median_mcp_v1", android.content.Context.MODE_PRIVATE);
+            String key = prefs.getString("mcp_llm_key", "");
+            if (key.isEmpty()) return new JSONObject().put("error", "LLM not configured - set apiKey first");
+            return llmAnalyze(new JSONObject().put("probe", "connectivity test").put("note", "此消息用于验证 LLM 配置连通性"));
+        }
+        return ctl.llmConfig(ctx);
     }
 
     private JSONObject perf() throws Exception {
@@ -1025,7 +1255,7 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject report() throws Exception {
         JSONObject state = state();
         JSONObject perf = perf();
-        JSONObject net = network();
+        JSONObject net = network(new JSONObject());
         List<JSONObject> logs = ctl.consoleSnapshot();
         JSONArray errs = new JSONArray();
         int errCount = 0;

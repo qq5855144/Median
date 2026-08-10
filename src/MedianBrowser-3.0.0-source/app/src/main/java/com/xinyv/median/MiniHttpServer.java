@@ -52,21 +52,32 @@ public final class MiniHttpServer {
         Response handle(String method, String path, Map<String, String> headers, byte[] body, String remoteHost);
     }
 
+    /** CONNECT 隧道处理器（MITM 代理）：返回 true 表示连接已被接管。 */
+    public interface ConnectHandler {
+        boolean handleConnect(String hostPort, Socket socket);
+    }
+
     private static final int MAX_BODY = 1024 * 1024;
     private static final int SO_TIMEOUT_MS = 15000;
 
     private final String host;
     private final int port;
     private final Handler handler;
+    private final ConnectHandler connectHandler;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ServerSocket serverSocket;
     private ExecutorService pool;
     private Thread acceptThread;
 
     public MiniHttpServer(String host, int port, Handler handler) {
+        this(host, port, handler, null);
+    }
+
+    public MiniHttpServer(String host, int port, Handler handler, ConnectHandler connectHandler) {
         this.host = host;
         this.port = port;
         this.handler = handler;
+        this.connectHandler = connectHandler;
     }
 
     public void start() throws IOException {
@@ -120,8 +131,10 @@ public final class MiniHttpServer {
                 OutputStream out = new BufferedOutputStream(socket.getOutputStream());
                 // 仅处理单请求（每次连接处理一个请求后关闭，保持简单可靠）
                 byte[] response = readAndHandle(in);
-                out.write(response);
-                out.flush();
+                if (response != null) {
+                    out.write(response);
+                    out.flush();
+                }
             } catch (SocketTimeoutException ignored) { }
             catch (IOException ignored) { }
             finally {
@@ -138,6 +151,14 @@ public final class MiniHttpServer {
             if (parts.length < 3) return plain(400, "text/plain; charset=utf-8", "bad request line");
             String method = parts[0];
             String path = parts[1];
+
+            // CONNECT 隧道（MITM 代理）：由 connectHandler 接管连接，返回 null 表示不再写响应
+            if ("CONNECT".equalsIgnoreCase(method)) {
+                if (connectHandler != null && connectHandler.handleConnect(path, socket)) {
+                    return null;
+                }
+                return plain(405, "text/plain; charset=utf-8", "connect not enabled");
+            }
 
             Map<String, String> headers = new HashMap<String, String>();
             int contentLength = 0;
