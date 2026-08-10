@@ -264,6 +264,16 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_home", "返回浏览器主页（Median 主页）", schema(null, null)));
         tools.put(tool("browser_console", "读取页面 Console 日志（error/warn/log 等）", schema(null, null)));
         tools.put(tool("browser_network", "读取页面网络请求记录（URL、类型、主框架、时间）与资源性能条目", schema(null, null)));
+        tools.put(tool("net_rule_add", "添加网络规则：block=拦截请求返回空响应; redirect=将请求重写到目标URL; inject=在主框架HTML的</head>前注入片段; replace=替换主框架HTML中的文本", schema(
+                new JSONObject().put("type", prop("string", "block|redirect|inject|replace"))
+                        .put("pattern", prop("string", "URL 子串（不区分大小写），replace 时同时作为被替换文本"))
+                        .put("target", prop("string", "redirect: 目标URL; inject: 注入的HTML/JS片段; replace: 替换后的文本"))
+                        .put("enabled", prop("boolean", "是否启用，默认 true")),
+                new String[]{"type", "pattern"})));
+        tools.put(tool("net_rule_list", "列出全部网络规则（id/type/pattern/target/enabled/hits 命中次数）", schema(null, null)));
+        tools.put(tool("net_rule_remove", "按 id 删除网络规则", schema(
+                new JSONObject().put("id", prop("string", "规则 id（net_rule_list 获取）")), new String[]{"id"})));
+        tools.put(tool("net_rule_clear", "清空全部网络规则", schema(null, null)));
         tools.put(tool("browser_perf", "读取页面性能指标（FCP、DOM 大小、资源数量等）", schema(null, null)));
         tools.put(tool("browser_report", "生成综合诊断报告（页面、Console、Network、性能汇总）", schema(null, null)));
         tools.put(tool("browser_history", "读取浏览历史", schema(null, null)));
@@ -340,6 +350,10 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_home".equals(name)) return nav("home");
             if ("browser_console".equals(name)) return console(args);
             if ("browser_network".equals(name)) return network();
+            if ("net_rule_add".equals(name)) return netRuleAdd(args);
+            if ("net_rule_list".equals(name)) return netRuleList();
+            if ("net_rule_remove".equals(name)) return netRuleRemove(args);
+            if ("net_rule_clear".equals(name)) return netRuleClear();
             if ("browser_perf".equals(name)) return perf();
             if ("browser_report".equals(name)) return report();
             if ("browser_history".equals(name)) return history(args);
@@ -789,6 +803,30 @@ public final class McpService implements MiniHttpServer.Handler {
         int errs = 0;
         for (JSONObject log : all) if ("error".equals(log.optString("type"))) errs++;
         return new JSONObject().put("total", filtered.size()).put("errorCount", errs).put("logs", logs);
+    }
+
+    private JSONObject netRuleAdd(JSONObject args) throws Exception {
+        String type = args.optString("type", "");
+        String pattern = args.optString("pattern", "");
+        String target = args.has("target") ? args.optString("target", "") : null;
+        boolean enabled = args.optBoolean("enabled", true);
+        JSONObject rule = ctl.addNetRule(type, pattern, target, enabled);
+        if (rule == null) return error("invalid rule: type must be block|redirect|inject|replace, pattern required");
+        return rule;
+    }
+
+    private JSONObject netRuleList() throws Exception {
+        return new JSONObject().put("count", ctl.netRuleSnapshot().length()).put("rules", ctl.netRuleSnapshot());
+    }
+
+    private JSONObject netRuleRemove(JSONObject args) throws Exception {
+        String id = args.optString("id", "");
+        if (id.isEmpty()) return error("id required");
+        return new JSONObject().put("removed", ctl.removeNetRule(id));
+    }
+
+    private JSONObject netRuleClear() throws Exception {
+        return new JSONObject().put("cleared", ctl.clearNetRules());
     }
 
     private JSONObject network() throws Exception {
