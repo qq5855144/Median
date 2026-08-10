@@ -348,7 +348,7 @@ public final class McpController {
     }
     // ==================== 远端 MCP 服务器配置（多 MCP 支持） ====================
     /** 读取全部远端 MCP 服务器配置（JSON 数组：name/url/token/enabled）。 */
-    public JSONArray remoteMcpList(Context context) {
+    public JSONArray remoteMcpList(Context context) throws Exception {
         SharedPreferences p = prefs(context.getApplicationContext());
         String raw = p.getString(KEY_MCP_SERVERS, "");
         JSONArray arr = new JSONArray();
@@ -358,7 +358,7 @@ public final class McpController {
         return arr;
     }
     /** 添加远端 MCP 服务器。url 支持 http://192.168.x.x:port 或 http://192.168.x.x:port/mcp。 */
-    public JSONObject remoteMcpAdd(Context context, String name, String url, String token) {
+    public JSONObject remoteMcpAdd(Context context, String name, String url, String token) throws Exception {
         String n = name == null ? "" : name.trim();
         String u = url == null ? "" : url.trim();
         if (n.isEmpty()) return new JSONObject().put("error", "name required");
@@ -381,7 +381,7 @@ public final class McpController {
         return new JSONObject().put("ok", true).put("servers", remoteMcpList(context));
     }
     /** 删除远端 MCP 服务器。 */
-    public JSONObject remoteMcpRemove(Context context, String name) {
+    public JSONObject remoteMcpRemove(Context context, String name) throws Exception {
         JSONArray arr = remoteMcpList(context);
         JSONArray out = new JSONArray();
         boolean found = false;
@@ -395,7 +395,7 @@ public final class McpController {
         return new JSONObject().put("ok", true).put("servers", remoteMcpList(context));
     }
     /** 更新远端 MCP 服务器（url/token/enabled，传 null 表示不变）。 */
-    public JSONObject remoteMcpUpdate(Context context, String name, String url, String token, Boolean enabled) {
+    public JSONObject remoteMcpUpdate(Context context, String name, String url, String token, Boolean enabled) throws Exception {
         JSONArray arr = remoteMcpList(context);
         for (int i = 0; i < arr.length(); i++) {
             JSONObject s = arr.optJSONObject(i);
