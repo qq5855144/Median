@@ -1925,7 +1925,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         } else if (mainFrame && "inject".equals(rule.type)) {
             return fetchTransform(url, rule.target, null, true);
         } else if (mainFrame && "replace".equals(rule.type)) {
-            return fetchTransform(url, rule.target, rule.pattern, false);
+            String matchText = rule.match != null ? rule.match : rule.pattern;
+            return fetchTransform(url, rule.target, matchText, false);
         }
         return null;
     }
