@@ -355,6 +355,118 @@ public final class McpController {
         return null;
     }
 
+    // ==================== 持久 JS 钩子（页面加载后自动注入） ====================
+    public static final class JsHook {
+        public final String id;
+        public final String script;
+        public final boolean enabled;
+        public volatile long hits;
+        public final long createdAt;
+        JsHook(String id, String script, boolean enabled) {
+            this.id = id; this.script = script; this.enabled = enabled;
+            this.hits = 0L; this.createdAt = System.currentTimeMillis();
+        }
+    }
+    private final List<JsHook> jsHooks = Collections.synchronizedList(new ArrayList<JsHook>());
+    private long hookSeq = 0;
+
+    /** 添加 JS 钩子，返回规则 JSON（含 id）。 */
+    public JSONObject addJsHook(String script, boolean enabled) {
+        if (script == null || script.trim().isEmpty()) return null;
+        String id;
+        synchronized (jsHooks) {
+            hookSeq++;
+            id = "h" + hookSeq + "_" + Long.toHexString(System.currentTimeMillis() & 0xffffff);
+            jsHooks.add(new JsHook(id, script, enabled));
+            bump("hook");
+        }
+        JSONObject o = new JSONObject();
+        try {
+            o.put("id", id).put("enabled", enabled).put("hits", 0L).put("script", script.trim());
+        } catch (Exception ignored) {}
+        return o;
+    }
+
+    public boolean removeJsHook(String id) {
+        if (id == null) return false;
+        synchronized (jsHooks) {
+            java.util.Iterator<JsHook> it = jsHooks.iterator();
+            while (it.hasNext()) { if (id.equals(it.next().id)) { it.remove(); return true; } }
+        }
+        return false;
+    }
+
+    public int clearJsHooks() {
+        synchronized (jsHooks) {
+            int n = jsHooks.size();
+            jsHooks.clear();
+            return n;
+        }
+    }
+
+    public org.json.JSONArray jsHookSnapshot() {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        synchronized (jsHooks) {
+            for (JsHook h : jsHooks) {
+                JSONObject o = new JSONObject();
+                try {
+                    o.put("id", h.id).put("enabled", h.enabled).put("hits", h.hits)
+                     .put("script", h.script.length() > 200 ? h.script.substring(0, 200) + "..." : h.script);
+                } catch (Exception ignored) {}
+                arr.put(o);
+            }
+        }
+        return arr;
+    }
+
+    /** 拼接全部启用的钩子脚本为一段（页面加载后注入）。 */
+    public String activeHookScript() {
+        StringBuilder sb = new StringBuilder();
+        synchronized (jsHooks) {
+            for (JsHook h : jsHooks) {
+                if (h.enabled) {
+                    sb.append("(function(){try{").append(h.script)
+                      .append(";window.__mcpHook__hits=(window.__mcpHook__hits||0)+1;}catch(e){}})();");
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    // ==================== 指纹伪装（off/light/full） ====================
+    private volatile String fingerprintLevel = "off";
+
+    public void setFingerprintLevel(String level) {
+        String l = level == null ? "off" : level.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!("off".equals(l) || "light".equals(l) || "full".equals(l))) l = "off";
+        fingerprintLevel = l;
+    }
+
+    public String fingerprintLevel() { return fingerprintLevel; }
+
+    /** 生成指纹伪装脚本（页面加载后注入）。 */
+    public String fingerprintScript() {
+        String level = fingerprintLevel;
+        if ("off".equals(level)) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("(function(){try{");
+        if ("light".equals(level) || "full".equals(level)) {
+            sb.append("Object.defineProperty(navigator,'hardwareConcurrency',{get:function(){return 8;},configurable:true});");
+            sb.append("Object.defineProperty(navigator,'deviceMemory',{get:function(){return 8;},configurable:true});");
+            sb.append("Object.defineProperty(navigator,'platform',{get:function(){return 'MacIntel';},configurable:true});");
+            sb.append("Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return 1;},configurable:true});");
+        }
+        if ("full".equals(level)) {
+            sb.append("Object.defineProperty(navigator,'webdriver',{get:function(){return false;},configurable:true});");
+            sb.append("Object.defineProperty(navigator,'languages',{get:function(){return ['zh-CN','zh','en-US'];},configurable:true});");
+            sb.append("Object.defineProperty(navigator,'language',{get:function(){return 'zh-CN';},configurable:true});");
+            sb.append("(function(){var _oc=HTMLCanvasElement.prototype.toDataURL;HTMLCanvasElement.prototype.toDataURL=function(){try{var r=_oc.apply(this,arguments);var c=document.createElement('canvas');c.width=2;c.height=2;var x=c.getContext('2d');x.fillStyle='rgb(1,2,3)';x.fillRect(0,0,2,2);var noise=x.getImageData(0,0,2,2).data;if(noise[0]%2===0){}return r;}catch(e){return _oc.apply(this,arguments);}};})();");
+            sb.append("(function(){var _gl=WebGLRenderingContext.prototype.getParameter;WebGLRenderingContext.prototype.getParameter=function(p){try{if(p===37445)return 'Intel Inc.';if(p===37446)return 'Intel(R) UHD Graphics 630';}catch(e){}return _gl.apply(this,arguments);};})();");
+        }
+        sb.append("window.__mcpFp=(window.__mcpFp||0)+1;") ;
+        sb.append("}catch(e){}})();");
+        return sb.toString();
+    }
     public void clearConsole() { synchronized (consoleLogs) { consoleLogs.clear(); } }
     public void bump(String key) {
         synchronized (counters) {
