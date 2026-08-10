@@ -5320,6 +5320,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 if (isHomeUrl(currentPageUrl)) showHome();
                 return null;
             }
+            if ("mcpBackgroundKeepAlive".equals(key) || "mcpKeepAlive".equals(key)) {
+                boolean v = "true".equalsIgnoreCase(value) || "1".equals(value);
+                prefs.edit().putBoolean("mcp_background_keepalive", v).apply();
+                return null;
+            }
             return "unknown setting: " + key;
         } catch (Exception e) {
             return e.getMessage() == null ? e.toString() : e.getMessage();
@@ -6363,6 +6368,22 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
     }
 
+    private PowerManager.WakeLock mcpKeepAliveLock;
+    private void acquireMcpKeepAliveLock() {
+        try {
+            if (mcpKeepAliveLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                mcpKeepAliveLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "median:mcp-keepalive");
+                mcpKeepAliveLock.setReferenceCounted(false);
+            }
+            if (!mcpKeepAliveLock.isHeld()) mcpKeepAliveLock.acquire();
+        } catch (Exception ignored) {}
+    }
+    private void releaseMcpKeepAliveLock() {
+        try {
+            if (mcpKeepAliveLock != null && mcpKeepAliveLock.isHeld()) mcpKeepAliveLock.release();
+        } catch (Exception ignored) {}
+    }
     private void releasePerformanceWakeLock() {
         uiHandler.removeCallbacks(performanceWakeRenewal);
         if (performanceWakeLock == null) return;
@@ -7090,6 +7111,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         value.put("networkDirect", performanceNetworkDirect);
         value.put("autoPip", autoPictureInPicture);
         value.put("cleanTracking", cleanTrackingParameters);
+        value.put("mcpBackgroundKeepAlive", prefs.getBoolean("mcp_background_keepalive", true));
         value.put("siteExceptions", new JSONArray(siteExceptions));
         HomePageConfig home = homePageConfig();
         value.put("homeTitle", home.title);
@@ -7449,10 +7471,15 @@ public final class MainActivity extends Activity implements McpController.UiBind
         updateAggressivePerformanceResources();
         try { Process.setThreadPriority(Process.myTid(), Process.THREAD_PRIORITY_DEFAULT); }
         catch (RuntimeException ignored) {}
-        if (webView != null && !pictureInPicture) {
+        boolean mcpKeepAlive = prefs.getBoolean("mcp_background_keepalive", true) && McpController.get().hasUi();
+        if (webView != null && !pictureInPicture && !mcpKeepAlive) {
             webView.onPause();
         }
-        McpController.get().detach();
+        if (mcpKeepAlive) {
+            acquireMcpKeepAliveLock();
+        } else {
+            McpController.get().detach();
+        }
         super.onPause();
     }
 
@@ -7460,6 +7487,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     protected void onResume() {
         super.onResume();
         McpController.get().attach(this);
+        releaseMcpKeepAliveLock();
         activityResumed = true;
         applyUiThreadPriority();
         applyDisplayPolicy();
@@ -7558,6 +7586,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     @Override
     protected void onDestroy() {
         McpController.get().stop();
+        releaseMcpKeepAliveLock();
         activityResumed = false;
         updateAggressivePerformanceResources();
         aggressivePerformanceController.stop(this);

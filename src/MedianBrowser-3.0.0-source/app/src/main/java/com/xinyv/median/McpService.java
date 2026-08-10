@@ -635,7 +635,7 @@ public final class McpService implements MiniHttpServer.Handler {
             }
             }
             else if(__KC__===9){
-            var fs=Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex='-1'])')).filter(function(x){return !x.disabled&&x.offsetParent!==null;});
+            var fs=Array.prototype.slice.call(document.querySelectorAll(\"a[href],button,input,select,textarea,[tabindex]:not([tabindex='-1'])\")).filter(function(x){return !x.disabled&&x.offsetParent!==null;});
             var idx=fs.indexOf(el);
             var next;
             if(sh){next=idx<=0?fs[fs.length-1]:fs[idx-1];}
