@@ -357,6 +357,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 DeepSeekPP.install(this, scriptStore);
             } catch (Exception ignored) {
             }
+            // DeepSeek++ 工具执行依赖本机 MCP 服务（8788）：确保在线，否则 AI 调工具必然失败
+            try {
+                McpController mcpAuto = McpController.get();
+                if (!mcpAuto.enabled(this)) mcpAuto.setEnabled(this, true);
+                if (!mcpAuto.isRunning()) mcpAuto.start(this);
+            } catch (Exception ignored) {
+            }
         }
         services = new BrowserServices(this);
         scriptExecutor = newIdleExecutor(1);
