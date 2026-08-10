@@ -192,6 +192,10 @@ public final class MitmProxy {
             SSLContext clientCtx = SSLContext.getInstance("TLS");
             clientCtx.init(null, null, null);
             Socket upstream = clientCtx.getSocketFactory().createSocket(host, port);
+            if (upstream instanceof SSLSocket) {
+                // 显式握手，确保加密通道在转发前建立（避免延迟握手被 Pump 线程绕过）
+                ((SSLSocket) upstream).startHandshake();
+            }
             try {
                 upstream.setSoTimeout(0);
                 tls.setSoTimeout(0);
