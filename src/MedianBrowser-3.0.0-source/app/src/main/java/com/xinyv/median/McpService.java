@@ -237,6 +237,17 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_eval", "在当前页面执行 JavaScript 并返回结果", schema(
                 new JSONObject().put("expression", prop("string", "要执行的 JS 表达式或语句")), new String[]{"expression"})));
         tools.put(tool("dspp_diag", "DeepSeek++ 运行时诊断（开关状态、内置脚本缓存、assets 读取）", schema(null, null)));
+        tools.put(tool("fs_list_dir", "列出目录内容（供 DeepSeek++ 读取本机文件）", schema(
+                new JSONObject().put("path", prop("string", "目录路径，如 /sdcard/Download/Median-v3.0.0")), new String[]{"path"})));
+        tools.put(tool("fs_read_file", "读取文件内容（文本或 base64，供 DeepSeek++ 读取本机文件）", schema(
+                new JSONObject().put("path", prop("string", "文件路径"))
+                        .put("maxBytes", prop("number", "最多读取字节数，默认 1048576"))
+                        .put("binary", prop("boolean", "true 返回 base64，false 返回 UTF-8 文本，默认 false")),
+                new String[]{"path"})));
+        tools.put(tool("fs_find_file", "在目录中按文件名模式搜索文件（如 *.apk）", schema(
+                new JSONObject().put("dir", prop("string", "搜索目录，默认 /sdcard/Download"))
+                        .put("pattern", prop("string", "文件名模式，如 *.apk 或 Median*")),
+                new String[]{"pattern"})));
         tools.put(tool("browser_dom", "提取当前页面结构化内容（标题、URL、正文文本、链接、可交互元素）", schema(null, null)));
         tools.put(tool("browser_interactive", "获取页面全部可交互元素（链接/按钮/输入框/下拉框，含唯一 selector 与屏幕坐标，可直接用于 browser_click / browser_type）", schema(null, null)));
         tools.put(tool("browser_text", "提取当前页面可见文本", schema(null, null)));
@@ -360,6 +371,9 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_state".equals(name)) return state();
             if ("browser_eval".equals(name)) return eval(args);
             if ("dspp_diag".equals(name)) return dsppDiag();
+            if ("fs_list_dir".equals(name)) return fsListDir(args);
+            if ("fs_read_file".equals(name)) return fsReadFile(args);
+            if ("fs_find_file".equals(name)) return fsFindFile(args);
             if ("browser_dom".equals(name)) return dom();
             if ("browser_text".equals(name)) return text();
             if ("browser_links".equals(name)) return links();
@@ -509,6 +523,94 @@ public final class McpService implements MiniHttpServer.Handler {
         while ((n = in.read(buf)) > 0) total += n;
         in.close();
         return total;
+    }
+
+    /** 列出目录内容（DeepSeek++ 文件桥）。 */
+    private JSONObject fsListDir(JSONObject args) throws Exception {
+        String path = args.optString("path", "/sdcard/Download");
+        java.io.File dir = new java.io.File(path);
+        if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "目录不存在: " + path));
+        java.io.File[] files = dir.listFiles();
+        JSONArray items = new JSONArray();
+        if (files != null) {
+            java.util.Arrays.sort(files, new java.util.Comparator<java.io.File>() {
+                public int compare(java.io.File a, java.io.File b) {
+                    boolean ad = a.isDirectory(), bd = b.isDirectory();
+                    if (ad != bd) return ad ? -1 : 1;
+                    return a.getName().compareToIgnoreCase(b.getName());
+                }
+            });
+            for (java.io.File f : files) {
+                items.put(new JSONObject()
+                        .put("name", f.getName())
+                        .put("isDir", f.isDirectory())
+                        .put("size", f.isFile() ? f.length() : 0)
+                        .put("modified", f.lastModified()));
+            }
+        }
+        return new JSONObject().put("result", new JSONObject()
+                .put("ok", true).put("path", path).put("items", items));
+    }
+    /** 读取文件（DeepSeek++ 文件桥）。文本默认，二进制 base64。 */
+    private JSONObject fsReadFile(JSONObject args) throws Exception {
+        String path = args.optString("path", "");
+        int maxBytes = args.optInt("maxBytes", 1048576);
+        boolean binary = args.optBoolean("binary", false);
+        java.io.File f = new java.io.File(path);
+        if (path.isEmpty() || !f.exists() || !f.isFile()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "文件不存在: " + path));
+        if (f.length() > 64L * 1024 * 1024) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "文件过大 (>64MB): " + f.length()));
+        java.io.FileInputStream in = new java.io.FileInputStream(f);
+        try {
+            int len = (int) Math.min(f.length(), maxBytes);
+            byte[] data = new byte[len];
+            int off = 0;
+            while (off < len) {
+                int r = in.read(data, off, len - off);
+                if (r < 0) break;
+                off += r;
+            }
+            if (binary) {
+                String b64 = android.util.Base64.encodeToString(data, 0, off, android.util.Base64.NO_WRAP);
+                return new JSONObject().put("result", new JSONObject()
+                        .put("ok", true).put("path", path).put("size", off)
+                        .put("truncated", off < f.length()).put("encoding", "base64").put("content", b64));
+            }
+            return new JSONObject().put("result", new JSONObject()
+                    .put("ok", true).put("path", path).put("size", off)
+                    .put("truncated", off < f.length()).put("encoding", "utf-8")
+                    .put("content", new String(data, 0, off, java.nio.charset.StandardCharsets.UTF_8)));
+        } finally {
+            in.close();
+        }
+    }
+    /** 按文件名模式搜索（DeepSeek++ 文件桥）。 */
+    private JSONObject fsFindFile(JSONObject args) throws Exception {
+        String dirPath = args.optString("dir", "/sdcard/Download");
+        String pattern = args.optString("pattern", "*.apk");
+        java.io.File dir = new java.io.File(dirPath);
+        if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "目录不存在: " + dirPath));
+        String regex = java.util.regex.Pattern.quote(pattern)
+                .replace("\\*", ".*").replace("\\?", ".");
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(regex, java.util.regex.Pattern.CASE_INSENSITIVE);
+        JSONArray matches = new JSONArray();
+        java.io.File[] files = dir.listFiles();
+        if (files != null) {
+            for (java.io.File f : files) {
+                if (f.isFile() && p.matcher(f.getName()).matches()) {
+                    matches.put(new JSONObject()
+                            .put("name", f.getName())
+                            .put("path", f.getAbsolutePath())
+                            .put("size", f.length())
+                            .put("modified", f.lastModified()));
+                }
+            }
+        }
+        return new JSONObject().put("result", new JSONObject()
+                .put("ok", true).put("dir", dirPath).put("pattern", pattern).put("matches", matches));
     }
 
     // ==================== DOM / 文本 / 链接 / 源码 ====================
