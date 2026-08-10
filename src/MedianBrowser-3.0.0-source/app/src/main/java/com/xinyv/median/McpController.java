@@ -98,7 +98,18 @@ public final class McpController {
     public void closeCurrentTab() { if (bindings != null) bindings.closeCurrentTab(); }
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }
     public JSONObject settingsSnapshot() { return bindings == null ? null : bindings.settingsSnapshot(); }
-    public String applySetting(String key, String value) { return bindings == null ? "mcp not attached" : bindings.applySetting(key, value); }
+    public String applySetting(final String key, final String value) {
+        if (bindings == null) return "mcp not attached";
+        final String[] err = new String[1];
+        Boolean done = onUi(new BlockingCall<Boolean>() {
+            @Override public Boolean run() {
+                err[0] = bindings.applySetting(key, value);
+                return true;
+            }
+        }, 5000);
+        if (done == null || !done) return "apply setting timeout";
+        return err[0];
+    }
     public void addBookmark(String url, String title) { if (bindings != null) bindings.addBookmark(url, title); }
     public void clearHistory() { if (bindings != null) bindings.clearHistory(); }
     /** 记录浏览器运行日志（环形缓冲）。level: info/warn/error。 */
