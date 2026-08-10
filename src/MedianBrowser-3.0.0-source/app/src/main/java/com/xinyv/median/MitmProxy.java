@@ -243,6 +243,8 @@ public final class MitmProxy {
             } catch (IOException ignored) { }
             finally {
                 try { out.flush(); } catch (IOException ignored) { }
+                // 关闭输出侧，让对端读到 EOF 并结束隧道（避免半开连接悬挂）
+                try { out.close(); } catch (IOException ignored) { }
             }
         }
     }
