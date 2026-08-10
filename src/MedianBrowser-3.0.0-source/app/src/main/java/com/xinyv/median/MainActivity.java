@@ -350,6 +350,14 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if (!MODE_PERFORMANCE.equals(performanceMode) && !MODE_POWER_SAVE.equals(performanceMode)) performanceMode = MODE_STANDARD;
         siteExceptions = new HashSet<String>(prefs.getStringSet("site_exceptions", new HashSet<String>()));
         scriptStore = new UserScriptStore(this);
+        // 启动时若 DeepSeek++ 已开启，自动用 assets 最新代码重装脚本（幂等）。
+        // 根治：升级 APK 后无需手动关→开；prefs 旧数据/损坏数据会被 assets 源码覆盖修复。
+        if (DeepSeekPP.isEnabled(this)) {
+            try {
+                DeepSeekPP.install(this, scriptStore);
+            } catch (Exception ignored) {
+            }
+        }
         services = new BrowserServices(this);
         scriptExecutor = newIdleExecutor(1);
         scriptNetworkExecutor = newIdleExecutor(3);
