@@ -188,8 +188,10 @@ public final class MitmProxy {
             tls.setUseClientMode(false);
             tls.startHandshake();
 
-            // 连接真实服务器
-            Socket upstream = new Socket(host, port);
+            // 连接真实服务器（客户端 TLS 握手，使用系统默认信任库验证真实证书）
+            SSLContext clientCtx = SSLContext.getInstance("TLS");
+            clientCtx.init(null, null, null);
+            Socket upstream = clientCtx.getSocketFactory().createSocket(host, port);
             try {
                 upstream.setSoTimeout(0);
                 tls.setSoTimeout(0);
