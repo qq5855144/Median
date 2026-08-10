@@ -252,7 +252,7 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_type", "向输入框输入文本（先聚焦再填值，触发 input/change 事件）", schema(
                 new JSONObject().put("selector", prop("string", "CSS 选择器")).put("text", prop("string", "要输入的文本")),
                 new String[]{"selector", "text"})));
-        tools.put(tool("browser_keyboard", "模拟按键（Enter/Backspace/Tab/Escape 或普通字符）", schema(
+        tools.put(tool("browser_keyboard", "模拟按键（Enter/Backspace/Tab/Escape/Delete/Home/End/方向键或普通字符，支持 Ctrl/Shift/Alt 组合）", schema(
                 new JSONObject().put("keys", prop("string", "按键序列，如 Enter、Tab")), new String[]{"keys"})));
         tools.put(tool("browser_tabs", "列出全部标签页（标题、URL、是否激活）", schema(null, null)));
         tools.put(tool("browser_new_tab", "新建标签页并激活", schema(
@@ -578,7 +578,7 @@ public final class McpService implements MiniHttpServer.Handler {
         if (!(decoded instanceof JSONObject)) return error("unexpected keyboard result");
         JSONObject info = (JSONObject) decoded;
         if (!info.optBoolean("ok", false)) return error(info.optString("error", "keyboard failed"));
-        return new JSONObject().put("ok", true).put("pressed", keys);
+        return new JSONObject().put("ok", true).put("pressed", keys).put("handled", info.optBoolean("handled", false));
     }
 
     private String buildKeyScript(String keys) {
@@ -592,6 +592,9 @@ public final class McpService implements MiniHttpServer.Handler {
         else if ("tab".equals(lower)) { key = "Tab"; code = "'Tab'"; keyCode = 9; }
         else if ("escape".equals(lower) || "esc".equals(lower)) { key = "Escape"; code = "'Escape'"; keyCode = 27; }
         else if ("space".equals(lower)) { key = " "; code = "' '"; keyCode = 32; }
+        else if ("delete".equals(lower) || "del".equals(lower)) { key = "Delete"; code = "'Delete'"; keyCode = 46; }
+        else if ("home".equals(lower)) { key = "Home"; code = "'Home'"; keyCode = 36; }
+        else if ("end".equals(lower)) { key = "End"; code = "'End'"; keyCode = 35; }
         else if ("arrowup".equals(lower)) { key = "ArrowUp"; code = "'ArrowUp'"; keyCode = 38; }
         else if ("arrowdown".equals(lower)) { key = "ArrowDown"; code = "'ArrowDown'"; keyCode = 40; }
         else if ("arrowleft".equals(lower)) { key = "ArrowLeft"; code = "'ArrowLeft'"; keyCode = 37; }
@@ -605,19 +608,78 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("alt".equals(m)) alt = true;
         }
         String keyJson = jsonString(key);
-        return "(function(){var el=document.activeElement;if(!el)return JSON.stringify({ok:false,error:'no focused element'});"
-                + "var opts={key:" + keyJson + ",code:" + code + ",keyCode:" + keyCode + ",which:" + keyCode
-                + ",bubbles:true,cancelable:true,ctrlKey:" + ctrl + ",shiftKey:" + shift + ",altKey:" + alt + "};"
-                + "el.dispatchEvent(new KeyboardEvent('keydown',opts));"
-                + "if(" + keyCode + "!==13)el.dispatchEvent(new KeyboardEvent('keypress',opts));"
-                + "el.dispatchEvent(new KeyboardEvent('keyup',opts));"
-                + "if(" + keyCode + "===13){if(el.tagName==='FORM'){el.submit();}else{var f=el.form;if(f)f.submit();}}"
-                + "if(" + keyCode + "===32||(" + keyCode + ">=48&&" + keyCode + "<=90)||(" + keyCode + ">=96&&" + keyCode + "<=111)){"
-                + "var start=el.selectionStart!=null?el.selectionStart:el.value.length;"
-                + "var end=el.selectionEnd!=null?el.selectionEnd:el.value.length;"
-                + "var v=el.value||'';el.value=v.slice(0,start)+" + keyJson + "+v.slice(end);"
-                + "el.dispatchEvent(new Event('input',{bubbles:true}));}"
-                + "return JSON.stringify({ok:true})})()";
+        String charJson = key.length() == 1 ? keyJson : "''";
+        String script = """
+            (function(){
+            var el=document.activeElement;
+            if(!el) return JSON.stringify({ok:false,error:'no focused element'});
+            var opts={key:__KEY__,code:__CODE__,keyCode:__KC__,which:__KC__,bubbles:true,cancelable:true,ctrlKey:__CTRL__,shiftKey:__SHIFT__,altKey:__ALT__};
+            var sh=opts.shiftKey;
+            var cancelled=!el.dispatchEvent(new KeyboardEvent('keydown',opts));
+            if(__KC__!==13&&__KC__!==9&&__KC__!==27) el.dispatchEvent(new KeyboardEvent('keypress',opts));
+            var handled=false;
+            if(!cancelled){
+            if(__KC__===13){
+            var f=el.tagName==='FORM'?el:el.form;
+            if(f){f.submit();handled=true;}
+            }
+            else if(__KC__===8||__KC__===46){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){
+            var s=el.selectionStart,e=el.selectionEnd,v=el.value||'';
+            if(__KC__===8){if(s!==e){el.value=v.slice(0,s)+v.slice(e);el.setSelectionRange(s,s);}
+            else if(s>0){el.value=v.slice(0,s-1)+v.slice(s);el.setSelectionRange(s-1,s-1);}}
+            else{if(s!==e){el.value=v.slice(0,s)+v.slice(e);el.setSelectionRange(s,s);}
+            else if(s<v.length){el.value=v.slice(0,s)+v.slice(s+1);el.setSelectionRange(s,s);}}
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            handled=true;
+            }
+            }
+            else if(__KC__===9){
+            var fs=Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex='-1'])')).filter(function(x){return !x.disabled&&x.offsetParent!==null;});
+            var idx=fs.indexOf(el);
+            var next;
+            if(sh){next=idx<=0?fs[fs.length-1]:fs[idx-1];}
+            else{next=idx<0?fs[0]:fs[(idx+1)%fs.length];}
+            if(next){next.focus();handled=true;}
+            }
+            else if(__KC__===27){
+            if(el.blur)el.blur();
+            handled=true;
+            }
+            else if(__KC__===35||__KC__===36){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){var vv=el.value||'';var pos=__KC__===35?vv.length:0;el.setSelectionRange(pos,pos);handled=true;}
+            }
+            else if(__KC__===37){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){var cs=el.selectionStart;if(cs>0){el.setSelectionRange(cs-1,cs-1);handled=true;}}
+            }
+            else if(__KC__===39){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){var cs2=el.selectionStart,v2=el.value||'';if(cs2<v2.length){el.setSelectionRange(cs2+1,cs2+1);handled=true;}}
+            }
+            else if(__KC__===38){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){el.setSelectionRange(0,0);handled=true;}
+            else{window.scrollBy(0,-120);handled=true;}
+            }
+            else if(__KC__===40){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){var v3=el.value||'';el.setSelectionRange(v3.length,v3.length);handled=true;}
+            else{window.scrollBy(0,120);handled=true;}
+            }
+            else if(__KC__===32||(__KC__>=48&&__KC__<=90)||(__KC__>=96&&__KC__<=111)){
+            var start=el.selectionStart!==undefined&&el.selectionStart!==null?el.selectionStart:el.value.length;
+            var end=el.selectionEnd!==undefined&&el.selectionEnd!==null?el.selectionEnd:el.value.length;
+            var v4=el.value||'';el.value=v4.slice(0,start)+__KEYCHAR__+v4.slice(end);
+            el.setSelectionRange(start+1,start+1);
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            handled=true;
+            }
+            }
+            el.dispatchEvent(new KeyboardEvent('keyup',opts));
+            return JSON.stringify({ok:true,handled:handled});
+            })()
+            """;
+        return script.replace("__KEY__", keyJson).replace("__CODE__", code)
+                .replace("__KC__", String.valueOf(keyCode))
+                .replace("__CTRL__", String.valueOf(ctrl)).replace("__SHIFT__", String.valueOf(shift))
+                .replace("__ALT__", String.valueOf(alt)).replace("__KEYCHAR__", charJson);
     }
 
     // ==================== 标签管理 ====================
