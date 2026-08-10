@@ -43,6 +43,7 @@ public final class McpController {
     private static final String KEY_LLM_ENDPOINT = "mcp_llm_endpoint";
     private static final String KEY_LLM_MODEL = "mcp_llm_model";
     private static final String KEY_LLM_KEY = "mcp_llm_key";
+    private static final String KEY_MCP_SERVERS = "mcp_remote_servers";
     private static final int DEFAULT_PORT = 8788;
     private static final int MAX_CONSOLE = 500;
     private static final int MAX_NETWORK = 400;
@@ -344,6 +345,74 @@ public final class McpController {
     }
     public void llmClearKey(Context context) {
         prefs(context.getApplicationContext()).edit().remove(KEY_LLM_KEY).apply();
+    }
+    // ==================== 远端 MCP 服务器配置（多 MCP 支持） ====================
+    /** 读取全部远端 MCP 服务器配置（JSON 数组：name/url/token/enabled）。 */
+    public JSONArray remoteMcpList(Context context) {
+        SharedPreferences p = prefs(context.getApplicationContext());
+        String raw = p.getString(KEY_MCP_SERVERS, "");
+        JSONArray arr = new JSONArray();
+        if (!raw.isEmpty()) {
+            try { arr = new JSONArray(raw); } catch (Exception ignored) { }
+        }
+        return arr;
+    }
+    /** 添加远端 MCP 服务器。url 支持 http://192.168.x.x:port 或 http://192.168.x.x:port/mcp。 */
+    public JSONObject remoteMcpAdd(Context context, String name, String url, String token) {
+        String n = name == null ? "" : name.trim();
+        String u = url == null ? "" : url.trim();
+        if (n.isEmpty()) return new JSONObject().put("error", "name required");
+        if (u.isEmpty()) return new JSONObject().put("error", "url required");
+        if (!u.startsWith("http://") && !u.startsWith("https://")) u = "http://" + u;
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        JSONArray arr = remoteMcpList(context);
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject s = arr.optJSONObject(i);
+            if (s != null && n.equals(s.optString("name"))) {
+                return new JSONObject().put("error", "server already exists: " + n);
+            }
+        }
+        JSONObject s = new JSONObject();
+        s.put("name", n).put("url", u)
+                .put("token", token == null ? "" : token.trim())
+                .put("enabled", true);
+        arr.put(s);
+        prefs(context.getApplicationContext()).edit().putString(KEY_MCP_SERVERS, arr.toString()).apply();
+        return new JSONObject().put("ok", true).put("servers", remoteMcpList(context));
+    }
+    /** 删除远端 MCP 服务器。 */
+    public JSONObject remoteMcpRemove(Context context, String name) {
+        JSONArray arr = remoteMcpList(context);
+        JSONArray out = new JSONArray();
+        boolean found = false;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject s = arr.optJSONObject(i);
+            if (s != null && name != null && name.equals(s.optString("name"))) { found = true; continue; }
+            if (s != null) out.put(s);
+        }
+        if (!found) return new JSONObject().put("error", "server not found: " + name);
+        prefs(context.getApplicationContext()).edit().putString(KEY_MCP_SERVERS, out.toString()).apply();
+        return new JSONObject().put("ok", true).put("servers", remoteMcpList(context));
+    }
+    /** 更新远端 MCP 服务器（url/token/enabled，传 null 表示不变）。 */
+    public JSONObject remoteMcpUpdate(Context context, String name, String url, String token, Boolean enabled) {
+        JSONArray arr = remoteMcpList(context);
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject s = arr.optJSONObject(i);
+            if (s != null && name != null && name.equals(s.optString("name"))) {
+                if (url != null && !url.trim().isEmpty()) {
+                    String u = url.trim();
+                    if (!u.startsWith("http://") && !u.startsWith("https://")) u = "http://" + u;
+                    while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+                    s.put("url", u);
+                }
+                if (token != null) s.put("token", token.trim());
+                if (enabled != null) s.put("enabled", enabled.booleanValue());
+                prefs(context.getApplicationContext()).edit().putString(KEY_MCP_SERVERS, arr.toString()).apply();
+                return new JSONObject().put("ok", true).put("servers", remoteMcpList(context));
+            }
+        }
+        return new JSONObject().put("error", "server not found: " + name);
     }
 
     // ==================== 网络规则引擎（block / redirect / inject / replace） ====================

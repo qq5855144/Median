@@ -34,7 +34,18 @@ public final class McpService implements MiniHttpServer.Handler {
 
     private final McpController ctl;
     private final String token;
-
+    /** 远端 MCP 工具索引：displayName -> 服务器引用（探测成功后重建）。 */
+    private final java.util.Map<String, RemoteToolRef> remoteToolIndex = new java.util.concurrent.ConcurrentHashMap<String, RemoteToolRef>();
+    /** 远端 MCP 服务器探测结果缓存（displayName -> 描述）。 */
+    private volatile String remoteToolsPayload = "[]";
+    private static final class RemoteToolRef {
+        String display;   // remote.<server>.<tool>
+        String server;    // 服务器名（配置中的 name）
+        String url;       // 服务器 MCP 端点
+        String token;     // 服务器 token（可空）
+        String tool;      // 远端真实工具名
+        String description;
+    }
     public McpService(McpController controller, String token) {
         this.ctl = controller;
         this.token = token;
@@ -136,6 +147,11 @@ public final class McpService implements MiniHttpServer.Handler {
             }
             if ("server/tools/list".equals(rpcMethod)) {
                 return respond(id, new JSONObject().put("tools", toolDefinitions()).put("_meta", serverMeta()));
+            }
+            if ("remote/tools".equals(rpcMethod)) {
+                // 内部方法：返回聚合后的远端 MCP 工具描述（供注入块动态合并到 DeepSeek 提示词）
+                refreshRemoteIndex();
+                return respond(id, new JSONObject().put("tools", new JSONArray(remoteToolsPayload)).put("servers", remoteServersSummary()));
             }
             if ("tools/call".equals(rpcMethod) || "server/tools/call".equals(rpcMethod)) {
                 return respond(id, callToolResult(params));
@@ -337,6 +353,20 @@ public final class McpService implements MiniHttpServer.Handler {
                 new JSONObject().put("url", prop("string", "目标 URL（http/https）")).put("maxBytes", prop("number", "响应最大字节数，默认 65536")),
                 new String[]{"url"})));
         tools.put(tool("browser_clear", "清空 Console 与 Network 记录", schema(null, null)));
+        tools.put(tool("mcp_config", "远端 MCP 服务器配置管理（多 MCP 支持）：action=list 列出全部服务器；action=add 添加服务器(name/url/token，url 为本机或局域网 MCP 地址，如 http://192.168.1.100:8788/mcp)；action=remove 删除(name)；action=set 修改(enabled=true/false 启用禁用、url、token)；action=discover 探测 name 指定服务器（空=全部）并缓存其工具", schema(
+                new JSONObject().put("action", prop("string", "list|add|remove|set|discover"))
+                        .put("name", prop("string", "服务器名称（add/remove/set/discover 时必填）"))
+                        .put("url", prop("string", "服务器 MCP 地址，如 http://192.168.1.100:8788/mcp（add/set 时必填）"))
+                        .put("token", prop("string", "服务器访问 token（可选）"))
+                        .put("enabled", prop("boolean", "是否启用（set 时可选）")),
+                new String[]{"action"})));
+        tools.put(tool("mcp_discover", "探测远端 MCP 服务器并缓存其工具列表：name 指定服务器（空=全部已启用）。探测成功后远端工具以 remote.<服务器名>.<工具名> 形式加入可用工具集，DeepSeek 可直接调用", schema(
+                new JSONObject().put("name", prop("string", "服务器名称，空=全部")), null)));
+        refreshRemoteIndex();
+        for (java.util.Map.Entry<String, RemoteToolRef> e : remoteToolIndex.entrySet()) {
+            RemoteToolRef r = e.getValue();
+            tools.put(tool(r.display, r.description, schema(null, null)));
+        }
         return tools;
     }
 
@@ -418,6 +448,11 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_clear".equals(name)) return clear();
             // 隐藏别名（兼容 BrowserDiag 习惯，坐标由 browser_click_at 使用）
             if ("browser_interactive".equals(name)) return interactive();
+            if ("mcp_config".equals(name)) return mcpConfig(args);
+            if ("mcp_discover".equals(name)) return mcpDiscover(args);
+            // 远端 MCP 工具转发（remote.<server>.<tool>）
+            RemoteToolRef ref = remoteToolIndex.get(name);
+            if (ref != null) return forwardRemoteCall(ref, args);
             return error("unknown tool: " + name);
         } catch (Exception e) {
             return error(e.getMessage() == null ? e.toString() : e.getMessage());
@@ -428,6 +463,242 @@ public final class McpService implements MiniHttpServer.Handler {
         JSONObject o = new JSONObject();
         try { o.put("error", message); } catch (Exception ignored) { }
         return o;
+    }
+    // ==================== 远端 MCP 服务器（多 MCP 支持） ====================
+    /** mcp_config：list/add/remove/set/discover。 */
+    private JSONObject mcpConfig(JSONObject args) throws Exception {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        String action = args.optString("action", "list");
+        String name = args.optString("name", "");
+        if ("add".equals(action)) {
+            return ctl.remoteMcpAdd(ctx, name, args.optString("url", ""), args.optString("token", ""));
+        }
+        if ("remove".equals(action)) {
+            if (name.isEmpty()) return error("name required");
+            JSONObject r = ctl.remoteMcpRemove(ctx, name);
+            if (r.has("ok")) refreshRemoteIndex();
+            return r;
+        }
+        if ("set".equals(action)) {
+            if (name.isEmpty()) return error("name required");
+            String url = args.has("url") ? args.optString("url", "") : null;
+            String token = args.has("token") ? args.optString("token", "") : null;
+            Boolean enabled = args.has("enabled") ? Boolean.valueOf(args.optBoolean("enabled", false)) : null;
+            JSONObject r = ctl.remoteMcpUpdate(ctx, name, url, token, enabled);
+            if (r.has("ok")) refreshRemoteIndex();
+            return r;
+        }
+        if ("discover".equals(action)) {
+            return mcpDiscover(args);
+        }
+        return ctl.remoteMcpList(ctx);
+    }
+    /** mcp_discover：探测远端服务器工具列表并缓存。 */
+    private JSONObject mcpDiscover(JSONObject args) throws Exception {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return error("context not ready");
+        String only = args.optString("name", "");
+        JSONArray servers = ctl.remoteMcpList(ctx);
+        JSONArray results = new JSONArray();
+        int probed = 0;
+        for (int i = 0; i < servers.length(); i++) {
+            JSONObject s = servers.optJSONObject(i);
+            if (s == null) continue;
+            String sn = s.optString("name", "");
+            if (!only.isEmpty() && !only.equals(sn)) continue;
+            if (!s.optBoolean("enabled", true)) {
+                results.put(new JSONObject().put("server", sn).put("status", "disabled"));
+                continue;
+            }
+            probed++;
+            JSONObject r = probeMcpServer(s);
+            if (r.has("error")) {
+                results.put(new JSONObject().put("server", sn).put("status", "error").put("error", r.optString("error")));
+            } else {
+                JSONArray tools = r.optJSONArray("tools");
+                results.put(new JSONObject().put("server", sn).put("status", "ok").put("tools", tools == null ? new JSONArray() : tools));
+            }
+        }
+        if (probed == 0 && servers.length() == 0) {
+            return new JSONObject().put("ok", true).put("note", "no remote MCP servers configured - use mcp_config action=add first")
+                    .put("servers", new JSONArray()).put("tools", new JSONArray());
+        }
+        refreshRemoteIndex();
+        JSONObject out = new JSONObject().put("ok", true).put("results", results);
+        out.put("remoteTools", new JSONArray(remoteToolsPayload));
+        out.put("servers", remoteServersSummary());
+        return out;
+    }
+    /** 探测单个远端 MCP 服务器（尝试 /mcp 端点，失败则回退裸地址）。 */
+    private JSONObject probeMcpServer(JSONObject server) {
+        String base = server.optString("url", "");
+        String token = server.optString("token", "");
+        String[] candidates;
+        if (base.endsWith("/mcp")) {
+            candidates = new String[]{ base };
+        } else {
+            candidates = new String[]{ base + "/mcp", base };
+        }
+        for (String endpoint : candidates) {
+            JSONObject r = mcpPost(endpoint, token, "tools/list", new JSONObject());
+            if (!r.has("error")) return r;
+        }
+        return error("cannot reach " + base + " (tried /mcp and root): " + candidates[0]);
+    }
+    /** 向远端 MCP 服务器发送 JSON-RPC 请求。 */
+    private JSONObject mcpPost(String endpoint, String token, String rpcMethod, JSONObject rpcParams) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("jsonrpc", "2.0").put("id", System.currentTimeMillis() % 100000).put("method", rpcMethod);
+            payload.put("params", rpcParams);
+            java.net.URL url = new java.net.URL(endpoint);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(20000);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json, text/event-stream");
+            if (token != null && !token.isEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer " + token);
+            }
+            conn.setDoOutput(true);
+            byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(body.length);
+            java.io.OutputStream os = conn.getOutputStream();
+            try { os.write(body); } finally { os.close(); }
+            int code = conn.getResponseCode();
+            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            if (in != null) {
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+                in.close();
+            }
+            conn.disconnect();
+            String raw = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            if (code >= 400) {
+                return error("remote HTTP " + code + ": " + (raw.length() > 300 ? raw.substring(0, 300) : raw));
+            }
+            // 兼容 streamable-http（可能返回 SSE 行），提取 JSON
+            if (raw.startsWith("event:") || raw.startsWith("data:")) {
+                StringBuilder sb = new StringBuilder();
+                for (String line : raw.split("\n")) {
+                    if (line.startsWith("data:")) {
+                        String d = line.substring(5).trim();
+                        if (d.startsWith("{")) sb.append(d);
+                    }
+                }
+                raw = sb.toString();
+                if (raw.isEmpty()) return error("empty remote SSE response");
+            }
+            JSONObject resp = new JSONObject(raw);
+            if (resp.has("error")) {
+                JSONObject e = resp.optJSONObject("error");
+                return error("remote rpc error: " + (e == null ? "unknown" : e.optString("message", String.valueOf(e))));
+            }
+            JSONObject result = resp.optJSONObject("result");
+            if (result == null) return error("remote result missing");
+            return result;
+        } catch (Exception e) {
+            return error("remote request failed: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
+        }
+    }
+    /** 重建远端工具索引（读取配置 + 探测启用服务器）。 */
+    private void refreshRemoteIndex() {
+        try {
+            android.content.Context ctx = ctl.context();
+            if (ctx == null) return;
+            remoteToolIndex.clear();
+            JSONArray servers = ctl.remoteMcpList(ctx);
+            JSONArray tools = new JSONArray();
+            for (int i = 0; i < servers.length(); i++) {
+                JSONObject s = servers.optJSONObject(i);
+                if (s == null || !s.optBoolean("enabled", true)) continue;
+                String sn = s.optString("name", "");
+                JSONObject r = probeMcpServer(s);
+                JSONArray list = r.optJSONArray("tools");
+                if (list == null || list.length() == 0) continue;
+                for (int j = 0; j < list.length(); j++) {
+                    JSONObject t = list.optJSONObject(j);
+                    if (t == null) continue;
+                    String realName = t.optString("name", "");
+                    if (realName.isEmpty()) continue;
+                    String display = "remote." + sn + "." + realName;
+                    RemoteToolRef ref = new RemoteToolRef();
+                    ref.display = display;
+                    ref.server = sn;
+                    ref.url = s.optString("url", "");
+                    ref.token = s.optString("token", "");
+                    ref.tool = realName;
+                    String desc = t.optString("description", "");
+                    ref.description = "[远端 MCP: " + sn + "] " + (desc.isEmpty() ? realName : desc);
+                    remoteToolIndex.put(display, ref);
+                    JSONObject to = new JSONObject();
+                    to.put("name", display).put("description", ref.description);
+                    tools.put(to);
+                }
+            }
+            remoteToolsPayload = tools.toString();
+        } catch (Exception ignored) { }
+    }
+    /** 服务器摘要（供注入块/工具结果展示）。 */
+    private JSONArray remoteServersSummary() {
+        JSONArray out = new JSONArray();
+        try {
+            android.content.Context ctx = ctl.context();
+            if (ctx == null) return out;
+            JSONArray servers = ctl.remoteMcpList(ctx);
+            for (int i = 0; i < servers.length(); i++) {
+                JSONObject s = servers.optJSONObject(i);
+                if (s == null) continue;
+                int n = 0;
+                for (RemoteToolRef r : remoteToolIndex.values()) {
+                    if (r.server.equals(s.optString("name"))) n++;
+                }
+                JSONObject o = new JSONObject();
+                o.put("name", s.optString("name")).put("url", s.optString("url"))
+                        .put("enabled", s.optBoolean("enabled", true)).put("tools", n);
+                out.put(o);
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+    /** 转发工具调用到远端 MCP 服务器。 */
+    private JSONObject forwardRemoteCall(RemoteToolRef ref, JSONObject args) {
+        JSONObject params = new JSONObject();
+        params.put("name", ref.tool);
+        params.put("arguments", args);
+        JSONObject r = mcpPost(ref.url, ref.token, "tools/call", params);
+        if (r.has("error")) return r;
+        // MCP 标准结果：content 数组（text/image），拼接为文本
+        JSONArray content = r.optJSONArray("content");
+        StringBuilder sb = new StringBuilder();
+        if (content != null) {
+            for (int i = 0; i < content.length(); i++) {
+                JSONObject c = content.optJSONObject(i);
+                if (c == null) continue;
+                String type = c.optString("type", "");
+                if ("text".equals(type)) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(c.optString("text", ""));
+                } else if ("image".equals(type)) {
+                    if (sb.length() > 0) sb.append("\n");
+                    String mime = c.optString("mimeType", "image/png");
+                    String data = c.optString("data", "");
+                    sb.append("[image ").append(mime).append(" ").append(data.length()).append(" chars]");
+                } else {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(c.toString());
+                }
+            }
+        }
+        JSONObject out = new JSONObject();
+        out.put("remote", ref.server).put("tool", ref.tool).put("ok", true);
+        out.put("result", sb.length() == 0 ? r.toString() : sb.toString());
+        if (r.has("isError") && r.optBoolean("isError", false)) out.put("remoteError", true);
+        return out;
     }
     private static JSONObject obj() { return new JSONObject(); }
     private static JSONArray arr() { return new JSONArray(); }
