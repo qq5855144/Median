@@ -700,6 +700,17 @@ public final class McpService implements MiniHttpServer.Handler {
         if (r.has("isError") && r.optBoolean("isError", false)) out.put("remoteError", true);
         return out;
     }
+    /** UI 面板探测入口（返回 JSON 字符串，供 MainActivity 直接展示）。 */
+    public String discoverForUi(String serverName) {
+        try {
+            JSONObject args = new JSONObject();
+            if (serverName != null && !serverName.isEmpty()) args.put("name", serverName);
+            return mcpDiscover(args).toString();
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+            return "{\"error\":\"" + msg.replace("\"", "'").replace("\n", " ") + "\"}";
+        }
+    }
     private static JSONObject obj() { return new JSONObject(); }
     private static JSONArray arr() { return new JSONArray(); }
 

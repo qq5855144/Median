@@ -2693,7 +2693,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "复制 MCP 配置（JSON）",
                 "复制 curl 测试命令",
                 "查看状态与统计",
-                "重启 MCP 服务"
+                "重启 MCP 服务",
+                "远端 MCP 服务器管理"
         };
         showActionSheet("MCP 连接信息", subtitle, items, null, new SheetHandler() {
             @Override public void onItem(int which) {
@@ -2734,12 +2735,156 @@ public final class MainActivity extends Activity implements McpController.UiBind
                         ctl.restart(MainActivity.this);
                         toast("MCP 服务已重启");
                         break;
+                    case 9:
+                        showRemoteMcpManager();
+                        break;
                     default: break;
                 }
             }
         });
     }
 
+    /** 远端 MCP 服务器管理：列表 + 添加 + 单服务器操作。 */
+    private void showRemoteMcpManager() {
+        final McpController ctl = McpController.get();
+        JSONArray servers;
+        try {
+            servers = ctl.remoteMcpList(this);
+        } catch (Exception e) {
+            toast("读取失败: " + e.getMessage());
+            return;
+        }
+        int n = servers == null ? 0 : servers.length();
+        String[] items = new String[n + 1];
+        items[0] = "➕ 添加服务器";
+        for (int i = 0; i < n; i++) {
+            JSONObject s = servers.optJSONObject(i);
+            if (s == null) continue;
+            String nm = s.optString("name", "");
+            String u = s.optString("url", "");
+            boolean en = s.optBoolean("enabled", true);
+            items[i + 1] = nm + "\n" + u + "（" + (en ? "已启用" : "已禁用") + "）";
+        }
+        showActionSheet("远端 MCP 服务器", "填入本机或局域网 MCP 地址，DeepSeek 自动识别并调用（可配置多个）", items, null, new SheetHandler() {
+            @Override public void onItem(int which) {
+                if (which == 0) { showAddRemoteServerDialog(); return; }
+                try {
+                    JSONObject s = ctl.remoteMcpList(MainActivity.this).optJSONObject(which - 1);
+                    if (s != null) showRemoteServerActions(s.optString("name", ""));
+                } catch (Exception ignored) { }
+            }
+        });
+    }
+    /** 添加远端 MCP 服务器对话框（名称 + 地址 + Token 可选）。 */
+    private void showAddRemoteServerDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        content.setPadding(pad * 2, pad, pad * 2, 0);
+        EditText nameInput = new EditText(this);
+        nameInput.setHint("服务器名称（如：电脑MCP）");
+        EditText urlInput = new EditText(this);
+        urlInput.setHint("MCP 地址（如 http://192.168.1.100:8788/mcp）");
+        urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        EditText tokenInput = new EditText(this);
+        tokenInput.setHint("Token（可选，留空则无需认证）");
+        content.addView(nameInput);
+        content.addView(urlInput);
+        content.addView(tokenInput);
+        new AlertDialog.Builder(this)
+                .setTitle("添加远端 MCP 服务器")
+                .setView(content)
+                .setPositiveButton("添加", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String name = nameInput.getText().toString().trim();
+                        String url = urlInput.getText().toString().trim();
+                        String token = tokenInput.getText().toString().trim();
+                        if (name.isEmpty() || url.isEmpty()) { toast("名称和地址不能为空"); return; }
+                        try {
+                            JSONObject r = McpController.get().remoteMcpAdd(MainActivity.this, name, url, token);
+                            if (r.has("error")) toast("添加失败: " + r.optString("error"));
+                            else {
+                                toast("已添加 " + name + "，正在探测工具…");
+                                String probe = McpController.get().remoteDiscoverForUi(name);
+                                showProbeResult(name, probe);
+                            }
+                        } catch (Exception e) { toast("添加失败: " + e.getMessage()); }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+    /** 单服务器操作：启用/禁用、探测、删除。 */
+    private void showRemoteServerActions(final String name) {
+        final McpController ctl = McpController.get();
+        JSONObject server = null;
+        try {
+            JSONArray arr = ctl.remoteMcpList(this);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject s = arr.optJSONObject(i);
+                if (s != null && name.equals(s.optString("name"))) { server = s; break; }
+            }
+        } catch (Exception ignored) { }
+        if (server == null) { toast("服务器不存在"); return; }
+        final boolean enabled = server.optBoolean("enabled", true);
+        String[] items = new String[] {
+                (enabled ? "禁用该服务器" : "启用该服务器"),
+                "探测工具列表",
+                "删除该服务器",
+                "返回"
+        };
+        showActionSheet("服务器：" + name, server.optString("url", ""), items, null, new SheetHandler() {
+            @Override public void onItem(int which) {
+                try {
+                    switch (which) {
+                        case 0:
+                            ctl.remoteMcpUpdate(MainActivity.this, name, null, null, Boolean.valueOf(!enabled));
+                            toast(enabled ? "已禁用 " + name : "已启用 " + name);
+                            break;
+                        case 1:
+                            toast("正在探测 " + name + " …");
+                            String probe = ctl.remoteDiscoverForUi(name);
+                            showProbeResult(name, probe);
+                            break;
+                        case 2:
+                            JSONObject r = ctl.remoteMcpRemove(MainActivity.this, name);
+                            toast(r.has("error") ? "删除失败: " + r.optString("error") : "已删除 " + name);
+                            break;
+                        default: break;
+                    }
+                } catch (Exception e) {
+                    toast("操作失败: " + e.getMessage());
+                }
+            }
+        });
+    }
+    /** 显示探测结果（成功列出工具数，失败显示原因）。 */
+    private void showProbeResult(String name, String probeJson) {
+        String summary;
+        try {
+            JSONObject r = new JSONObject(probeJson);
+            if (r.has("error")) {
+                summary = "探测失败：" + r.optString("error");
+            } else {
+                int count = 0;
+                JSONArray results = r.optJSONArray("results");
+                if (results != null && results.length() > 0) {
+                    JSONObject first = results.optJSONObject(0);
+                    if (first != null) {
+                        JSONArray tools = first.optJSONArray("tools");
+                        if (tools != null) count = tools.length();
+                        if (first.has("error")) summary = "探测失败：" + first.optString("error");
+                        else summary = "探测成功：发现 " + count + " 个工具";
+                    } else summary = "探测完成（无结果）";
+                } else {
+                    summary = "探测完成（未发现工具，请确认地址正确）";
+                }
+            }
+        } catch (Exception e) {
+            summary = "探测结果解析失败：" + e.getMessage() + "\n原始：" + (probeJson.length() > 200 ? probeJson.substring(0, 200) : probeJson);
+        }
+        toast(name + "：" + summary);
+    }
     /** 复制文本到剪贴板并提示。 */
     private void copyText(String text, String message) {
         if (text == null || text.length() == 0) return;
