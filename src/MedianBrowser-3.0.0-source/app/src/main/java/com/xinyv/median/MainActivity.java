@@ -3339,6 +3339,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
             }
             DeepSeekPP.setEnabled(this, enable);
             toast(enable ? "DeepSeek++ 模式已开启，访问 chat.deepseek.com 生效" : "DeepSeek++ 模式已关闭");
+            refreshUserScriptRegistrations(enable);
             if (isHomeUrl(currentPageUrl)) showHome();
         } catch (Exception e) {
             toast("DeepSeek++ 切换失败：" + (e.getMessage() == null ? e.toString() : e.getMessage()));
