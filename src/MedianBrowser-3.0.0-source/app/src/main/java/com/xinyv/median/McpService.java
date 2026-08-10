@@ -527,6 +527,8 @@ public final class McpService implements MiniHttpServer.Handler {
 
     /** 列出目录内容（DeepSeek++ 文件桥）。 */
     private JSONObject fsListDir(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
         String path = args.optString("path", "/sdcard/Download");
         java.io.File dir = new java.io.File(path);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
@@ -554,6 +556,8 @@ public final class McpService implements MiniHttpServer.Handler {
     }
     /** 读取文件（DeepSeek++ 文件桥）。文本默认，二进制 base64。 */
     private JSONObject fsReadFile(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
         String path = args.optString("path", "");
         int maxBytes = args.optInt("maxBytes", 1048576);
         boolean binary = args.optBoolean("binary", false);
@@ -588,13 +592,14 @@ public final class McpService implements MiniHttpServer.Handler {
     }
     /** 按文件名模式搜索（DeepSeek++ 文件桥）。 */
     private JSONObject fsFindFile(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
         String dirPath = args.optString("dir", "/sdcard/Download");
         String pattern = args.optString("pattern", "*.apk");
         java.io.File dir = new java.io.File(dirPath);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "目录不存在: " + dirPath));
-        String regex = java.util.regex.Pattern.quote(pattern)
-                .replace("\\*", ".*").replace("\\?", ".");
+        String regex = pattern.replaceAll("([.\\\\+()\\\\[\\\\]{}^$|])", "\\\\$1").replace("*", ".*").replace("?", ".");
         java.util.regex.Pattern p = java.util.regex.Pattern.compile(regex, java.util.regex.Pattern.CASE_INSENSITIVE);
         JSONArray matches = new JSONArray();
         java.io.File[] files = dir.listFiles();
