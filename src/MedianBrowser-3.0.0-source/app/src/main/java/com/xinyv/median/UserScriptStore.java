@@ -570,7 +570,6 @@ final class UserScriptStore {
                 }
             }
         }
-        android.util.Log.d("MedianDspp", "loadCache prefs=" + cache.size() + " assets=" + (assetScripts == null ? 0 : assetScripts.size()));
     }
 
     private void persist() {
