@@ -7324,6 +7324,35 @@ public final class MainActivity extends Activity implements McpController.UiBind
         });
     }
 
+    @Override public JSONObject dsppDiagnostics() {
+        JSONObject out = new JSONObject();
+        try {
+            out.put("enabled", DeepSeekPP.isEnabled(this));
+            Map<String, String> am = buildDsppAssetMap();
+            JSONObject assetLens = new JSONObject();
+            for (Map.Entry<String, String> e : am.entrySet()) {
+                assetLens.put(e.getKey(), e.getValue() == null ? 0 : e.getValue().length());
+            }
+            out.put("assetLens", assetLens);
+            JSONArray scripts = new JSONArray();
+            if (scriptStore != null) {
+                for (UserScriptStore.Script s : scriptStore.getAll()) {
+                    JSONObject j = new JSONObject();
+                    j.put("id", s.id);
+                    j.put("name", s.name);
+                    j.put("sourceUrl", s.sourceUrl);
+                    j.put("codeLen", s.code == null ? 0 : s.code.length());
+                    j.put("enabled", s.enabled);
+                    j.put("quarantined", s.quarantined);
+                    scripts.put(j);
+                }
+            }
+            out.put("scripts", scripts);
+        } catch (Exception e) {
+            try { out.put("error", String.valueOf(e)); } catch (Exception ignored) {}
+        }
+        return out;
+    }
     @Override public JSONObject settingsSnapshot() {
         try {
         JSONObject value = new JSONObject();

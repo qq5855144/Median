@@ -236,6 +236,7 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_state", "获取浏览器与当前页面状态（URL、标题、加载进度、标签数、MCP 端口）", schema(null, null)));
         tools.put(tool("browser_eval", "在当前页面执行 JavaScript 并返回结果", schema(
                 new JSONObject().put("expression", prop("string", "要执行的 JS 表达式或语句")), new String[]{"expression"})));
+        tools.put(tool("dspp_diag", "DeepSeek++ 运行时诊断（开关状态、内置脚本缓存、assets 读取）", schema(null, null)));
         tools.put(tool("browser_dom", "提取当前页面结构化内容（标题、URL、正文文本、链接、可交互元素）", schema(null, null)));
         tools.put(tool("browser_interactive", "获取页面全部可交互元素（链接/按钮/输入框/下拉框，含唯一 selector 与屏幕坐标，可直接用于 browser_click / browser_type）", schema(null, null)));
         tools.put(tool("browser_text", "提取当前页面可见文本", schema(null, null)));
@@ -358,6 +359,7 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_open".equals(name) || "browser_nav".equals(name)) return open(args);
             if ("browser_state".equals(name)) return state();
             if ("browser_eval".equals(name)) return eval(args);
+            if ("dspp_diag".equals(name)) return dsppDiag();
             if ("browser_dom".equals(name)) return dom();
             if ("browser_text".equals(name)) return text();
             if ("browser_links".equals(name)) return links();
@@ -476,6 +478,37 @@ public final class McpService implements MiniHttpServer.Handler {
         if (raw == null) return error("TIMEOUT_OR_NO_PAGE");
         Object value = decodeEvalValue(raw);
         return new JSONObject().put("result", value == null ? JSONObject.NULL : value);
+    }
+
+    /** DeepSeek++ 运行时诊断：开关状态、内置脚本缓存、assets 读取结果。 */
+    private JSONObject dsppDiag() throws Exception {
+        JSONObject out = new JSONObject();
+        android.content.Context ctx = ctl.context();
+        out.put("contextReady", ctx != null);
+        if (ctx != null) {
+            out.put("enabled", DeepSeekPP.isEnabled(ctx));
+            JSONObject asset = new JSONObject();
+            try {
+                asset.put("mainworld", assetLen(ctx, "dspp/dspp_mainworld.js"));
+                asset.put("content", assetLen(ctx, "dspp/dspp_content.js"));
+            } catch (Exception e) {
+                asset.put("error", String.valueOf(e));
+            }
+            out.put("assets", asset);
+        }
+        out.put("bindingsReady", ctl.hasUi());
+        JSONObject app = ctl.dsppDiagnostics();
+        if (app != null) out.put("app", app);
+        return new JSONObject().put("result", out);
+    }
+    private int assetLen(android.content.Context ctx, String path) throws Exception {
+        java.io.InputStream in = ctx.getAssets().open(path);
+        int total = 0;
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) total += n;
+        in.close();
+        return total;
     }
 
     // ==================== DOM / 文本 / 链接 / 源码 ====================

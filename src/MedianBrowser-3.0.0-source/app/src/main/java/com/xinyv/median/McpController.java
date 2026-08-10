@@ -62,6 +62,7 @@ public final class McpController {
         String applySetting(String key, String value); // 修改设置，null=成功
         void addBookmark(String url, String title);    // 添加书签（已存在则忽略）
         void clearHistory();         // 清空浏览历史
+        JSONObject dsppDiagnostics();  // DeepSeek++ 运行时诊断（开关/脚本缓存/内置资产读取）
     }
 
     private static volatile McpController instance;
@@ -102,6 +103,7 @@ public final class McpController {
     public List<?> liveTabs() { return bindings == null ? null : bindings.liveTabs(); }
     public int currentTabIndex() { return bindings == null ? -1 : bindings.currentTabIndex(); }
     public void newTab(String url) { if (bindings != null) bindings.newTab(url); }
+    public JSONObject dsppDiagnostics() { return bindings == null ? null : bindings.dsppDiagnostics(); }
     public void closeCurrentTab() { if (bindings != null) bindings.closeCurrentTab(); }
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }
     public void showHome() { if (bindings != null) bindings.showHome(); }
