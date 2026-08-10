@@ -349,7 +349,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         cleanTrackingParameters = prefs.getBoolean("clean_tracking_parameters", true);
         if (!MODE_PERFORMANCE.equals(performanceMode) && !MODE_POWER_SAVE.equals(performanceMode)) performanceMode = MODE_STANDARD;
         siteExceptions = new HashSet<String>(prefs.getStringSet("site_exceptions", new HashSet<String>()));
-        scriptStore = new UserScriptStore(this, buildDsppAssetMap());
+        scriptStore = new UserScriptStore(this, DeepSeekPP.isEnabled(this) ? buildDsppAssetMap() : null);
         // 启动时若 DeepSeek++ 已开启，自动用 assets 最新代码重装脚本（幂等）。
         // 根治：升级 APK 后无需手动关→开；prefs 旧数据/损坏数据会被 assets 源码覆盖修复。
         if (DeepSeekPP.isEnabled(this)) {
@@ -3369,8 +3369,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             in.close();
+            int len = out.size();
+            android.util.Log.d("MedianDspp", "readAsset " + path + " len=" + len);
             return new String(out.toByteArray(), StandardCharsets.UTF_8);
         } catch (Exception e) {
+            android.util.Log.d("MedianDspp", "readAsset " + path + " FAIL " + e);
             return "";
         }
     }

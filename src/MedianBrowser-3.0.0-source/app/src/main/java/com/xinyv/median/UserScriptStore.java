@@ -521,8 +521,6 @@ final class UserScriptStore {
                 script.downloadUrl = object.optString("downloadUrl", "");
                 script.runAt = object.optString("runAt", "document-end");
                 script.code = decompressFromStore(object.optString("code", ""));
-                String assetCode = assetScripts == null ? null : assetScripts.get(script.sourceUrl);
-                if (assetCode != null && assetCode.length() > 0) script.code = assetCode;
                 script.requireCode = object.optString("requireCode", "");
                 if (script.code.length() > 1024 * 1024 || script.requireCode.length() > 1024 * 1024) continue;
                 script.noFrames = object.optBoolean("noFrames", false);
@@ -547,6 +545,32 @@ final class UserScriptStore {
         } catch (JSONException ignored) {
             cache.clear();
         }
+        // 强制合并内置 assets 脚本：无论 prefs 数据是否缺失/损坏/sourceUrl 不匹配，都用 assets 最新代码
+        // 确保 cache 内的 DeepSeek++ 内置脚本为最新版本（置于 try 之外，prefs 解析失败也不受影响）。
+        if (assetScripts != null) {
+            for (Map.Entry<String, String> entry : assetScripts.entrySet()) {
+                String url = entry.getKey();
+                String code = entry.getValue();
+                if (url == null || code == null || code.length() == 0) continue;
+                try {
+                    Script builtin = parseUserScript(code, url);
+                    builtin.enabled = true;
+                    boolean replaced = false;
+                    for (int i = 0; i < cache.size(); i++) {
+                        if (cache.get(i).id.equals(builtin.id)) {
+                            builtin.enabled = cache.get(i).enabled || builtin.enabled;
+                            builtin.quarantined = cache.get(i).quarantined;
+                            cache.set(i, builtin);
+                            replaced = true;
+                            break;
+                        }
+                    }
+                    if (!replaced && cache.size() < 128) cache.add(builtin);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        android.util.Log.d("MedianDspp", "loadCache prefs=" + cache.size() + " assets=" + (assetScripts == null ? 0 : assetScripts.size()));
     }
 
     private void persist() {
