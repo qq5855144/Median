@@ -614,19 +614,19 @@ public final class McpService implements MiniHttpServer.Handler {
             var el=document.activeElement;
             if(!el) return JSON.stringify({ok:false,error:'no focused element'});
             var opts={key:__KEY__,code:__CODE__,keyCode:__KC__,which:__KC__,bubbles:true,cancelable:true,ctrlKey:__CTRL__,shiftKey:__SHIFT__,altKey:__ALT__};
-            var sh=opts.shiftKey;
+            var k=opts.key, sh=opts.shiftKey;
             var cancelled=!el.dispatchEvent(new KeyboardEvent('keydown',opts));
-            if(__KC__!==13&&__KC__!==9&&__KC__!==27) el.dispatchEvent(new KeyboardEvent('keypress',opts));
+            if(k!=='Enter'&&k!=='Tab'&&k!=='Escape'&&k!=='Backspace'&&k!=='Delete'&&k!=='Home'&&k!=='End'&&k!=='ArrowLeft'&&k!=='ArrowRight'&&k!=='ArrowUp'&&k!=='ArrowDown') el.dispatchEvent(new KeyboardEvent('keypress',opts));
             var handled=false;
             if(!cancelled){
-            if(__KC__===13){
+            if(k==='Enter'){
             var f=el.tagName==='FORM'?el:el.form;
             if(f){f.submit();handled=true;}
             }
-            else if(__KC__===8||__KC__===46){
+            else if(k==='Backspace'||k==='Delete'){
             if(el.selectionStart!==undefined&&el.selectionStart!==null){
             var s=el.selectionStart,e=el.selectionEnd,v=el.value||'';
-            if(__KC__===8){if(s!==e){el.value=v.slice(0,s)+v.slice(e);el.setSelectionRange(s,s);}
+            if(k==='Backspace'){if(s!==e){el.value=v.slice(0,s)+v.slice(e);el.setSelectionRange(s,s);}
             else if(s>0){el.value=v.slice(0,s-1)+v.slice(s);el.setSelectionRange(s-1,s-1);}}
             else{if(s!==e){el.value=v.slice(0,s)+v.slice(e);el.setSelectionRange(s,s);}
             else if(s<v.length){el.value=v.slice(0,s)+v.slice(s+1);el.setSelectionRange(s,s);}}
@@ -634,7 +634,7 @@ public final class McpService implements MiniHttpServer.Handler {
             handled=true;
             }
             }
-            else if(__KC__===9){
+            else if(k==='Tab'){
             var fs=Array.prototype.slice.call(document.querySelectorAll(\"a[href],button,input,select,textarea,[tabindex]:not([tabindex='-1'])\")).filter(function(x){return !x.disabled&&x.offsetParent!==null;});
             var idx=fs.indexOf(el);
             var next;
@@ -642,28 +642,28 @@ public final class McpService implements MiniHttpServer.Handler {
             else{next=idx<0?fs[0]:fs[(idx+1)%fs.length];}
             if(next){next.focus();handled=true;}
             }
-            else if(__KC__===27){
+            else if(k==='Escape'){
             if(el.blur)el.blur();
             handled=true;
             }
-            else if(__KC__===35||__KC__===36){
-            if(el.selectionStart!==undefined&&el.selectionStart!==null){var vv=el.value||'';var pos=__KC__===35?vv.length:0;el.setSelectionRange(pos,pos);handled=true;}
+            else if(k==='Home'||k==='End'){
+            if(el.selectionStart!==undefined&&el.selectionStart!==null){var vv=el.value||'';var pos=k==='End'?vv.length:0;el.setSelectionRange(pos,pos);handled=true;}
             }
-            else if(__KC__===37){
+            else if(k==='ArrowLeft'){
             if(el.selectionStart!==undefined&&el.selectionStart!==null){var cs=el.selectionStart;if(cs>0){el.setSelectionRange(cs-1,cs-1);handled=true;}}
             }
-            else if(__KC__===39){
+            else if(k==='ArrowRight'){
             if(el.selectionStart!==undefined&&el.selectionStart!==null){var cs2=el.selectionStart,v2=el.value||'';if(cs2<v2.length){el.setSelectionRange(cs2+1,cs2+1);handled=true;}}
             }
-            else if(__KC__===38){
+            else if(k==='ArrowUp'){
             if(el.selectionStart!==undefined&&el.selectionStart!==null){el.setSelectionRange(0,0);handled=true;}
             else{window.scrollBy(0,-120);handled=true;}
             }
-            else if(__KC__===40){
+            else if(k==='ArrowDown'){
             if(el.selectionStart!==undefined&&el.selectionStart!==null){var v3=el.value||'';el.setSelectionRange(v3.length,v3.length);handled=true;}
             else{window.scrollBy(0,120);handled=true;}
             }
-            else if(__KC__===32||(__KC__>=48&&__KC__<=90)||(__KC__>=96&&__KC__<=111)){
+            else if(k.length===1){
             var start=el.selectionStart!==undefined&&el.selectionStart!==null?el.selectionStart:el.value.length;
             var end=el.selectionEnd!==undefined&&el.selectionEnd!==null?el.selectionEnd:el.value.length;
             var v4=el.value||'';el.value=v4.slice(0,start)+__KEYCHAR__+v4.slice(end);
