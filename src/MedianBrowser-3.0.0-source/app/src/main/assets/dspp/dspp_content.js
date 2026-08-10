@@ -26,7 +26,7 @@ remove:function(keys,cb){var a=Array.isArray(keys)?keys:[keys];a.forEach(functio
 QUOTA_BYTES:5242880};
 chrome.storage.onChanged={addListener:function(){},removeListener:function(){}};
 chrome.runtime=chrome.runtime||{};chrome.runtime.id='median-deepseek-pp';
-chrome.runtime.getURL=function(p){return p||'';};
+chrome.runtime.getURL=chrome.runtime.getURL||function(p){return p||'';};
 chrome.runtime.sendMessage=chrome.runtime.sendMessage||function(msg,cb){var r=Promise.resolve({ok:false,error:'mobile-mode',mobile:true});if(cb)r.then(cb);return r;};
 chrome.runtime.onMessage=chrome.runtime.onMessage||{addListener:function(){},removeListener:function(){}};
 })();
