@@ -27,6 +27,7 @@ final class HomePage {
         String searchMuted = wallpaper && !glass ? "#5f6368" : secondary;
         String tileRadius = "circle".equals(options.tileShape) ? "50%" : ("square".equals(options.tileShape) ? "8px" : "16px");
         StringBuilder shortcuts = new StringBuilder();
+        shortcuts.append("<a class='shortcut' href='https://chat.deepseek.com/'><span class='tile'>DS</span><span class='label'>DeepSeek</span></a>");
         int count = options.showShortcuts ? Math.min(12, bookmarks == null ? 0 : bookmarks.size()) : 0;
         if (options.showShortcuts) {
             for (int i = 0; i < count; i++) {
@@ -81,7 +82,7 @@ final class HomePage {
             page.append("<form id='form'><div class='search'><span class='mag'></span><input id='q' autocomplete='off' enterkeyhint='search' placeholder='搜索或输入网址'></div></form>");
             if (options.showEngines) page.append("<div class='engines'><button class='chip' data-e='google'>Google</button><button class='chip' data-e='baidu'>百度</button><button class='chip' data-e='bing'>Bing</button><button class='chip' data-e='custom'>自定义</button></div>");
         }
-        if (options.showShortcuts) page.append("<div class='shortcuts'>").append(shortcuts).append("</div>");
+        page.append("<div class='shortcuts'>").append(shortcuts).append("</div>");
         page.append("</main><script>let e='").append(engine).append("';function draw(){document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x.dataset.e===e))}document.querySelectorAll('.chip').forEach(x=>x.onclick=function(ev){ev.preventDefault();e=this.dataset.e;draw();location.href='median://engine?name='+e});let f=document.getElementById('form');if(f)f.onsubmit=function(ev){ev.preventDefault();let q=document.getElementById('q').value.trim();if(q)location.href='median://search?engine='+e+'&q='+encodeURIComponent(q)};let c=document.getElementById('clock');if(c){function tick(){let d=new Date();c.textContent=d.getHours()+':'+('0'+d.getMinutes()).slice(-2);document.getElementById('date').textContent=d.toLocaleDateString(undefined,{month:'long',day:'numeric',weekday:'short'})}tick();setInterval(tick,30000)}draw()</script></body></html>");
         return page.toString();
     }

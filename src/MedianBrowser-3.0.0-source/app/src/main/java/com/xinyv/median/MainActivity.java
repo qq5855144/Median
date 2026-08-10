@@ -2694,7 +2694,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "复制 curl 测试命令",
                 "查看状态与统计",
                 "重启 MCP 服务",
-                "远端 MCP 服务器管理"
+                "远端 MCP 服务器管理",
+                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭")
         };
         showActionSheet("MCP 连接信息", subtitle, items, null, new SheetHandler() {
             @Override public void onItem(int which) {
@@ -2737,6 +2738,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
                         break;
                     case 9:
                         showRemoteMcpManager();
+                        break;
+                    case 10:
+                        toggleDeepSeekPP();
                         break;
                     default: break;
                 }
@@ -3450,12 +3454,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "个性化主页",
                 "清空浏览历史",
                 "打开本地快速主页",
-                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
                 "关于 Median"
         };
         int[] icons = new int[] { BrowserIconView.SHIELD, BrowserIconView.SHIELD, BrowserIconView.SHIELD,
                 BrowserIconView.TABS, BrowserIconView.SEARCH, BrowserIconView.SEARCH, BrowserIconView.HOME,
-                BrowserIconView.CLOSE, BrowserIconView.HOME, BrowserIconView.SCRIPT, BrowserIconView.INFO };
+                BrowserIconView.CLOSE, BrowserIconView.HOME, BrowserIconView.INFO };
         showActionSheet("浏览器设置", "隐私优先 · 设置仅保存在本机", items, icons, new SheetHandler() {
             @Override public void onItem(int which) {
                 if (which == 0) { httpsOnly = !httpsOnly; prefs.edit().putBoolean("https_only", httpsOnly).apply(); }
@@ -3475,7 +3478,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 else if (which == 6) showHomeCustomization();
                 else if (which == 7) confirmClearHistory();
                 else if (which == 8) showHome();
-                else if (which == 9) toggleDeepSeekPP();
                 else showAbout();
             }
         });
