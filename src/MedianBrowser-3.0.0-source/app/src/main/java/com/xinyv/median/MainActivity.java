@@ -129,6 +129,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private static final int MAX_RESOURCE_TOTAL_BYTES = 2 * 1024 * 1024;
     private static final int MAX_TABS = 64;
     private static final byte[] EMPTY_RESPONSE = new byte[0];
+    private static final String NET_RULE_UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36 Median/3.0";
     private static final String MODE_PERFORMANCE = "performance";
     private static final String MODE_STANDARD = "standard";
     private static final String MODE_POWER_SAVE = "power_save";
@@ -1749,6 +1750,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private WebResourceResponse interceptRequest(WebView source, String requestUrl) {
         Uri uri = null;
         try { uri = Uri.parse(requestUrl); } catch (RuntimeException ignored) {}
+        WebResourceResponse ruleResp = applyNetRule(source, uri, false);
+        if (ruleResp != null) return ruleResp;
         WebResourceResponse homeAsset = interceptHomeAsset(source, uri);
         if (homeAsset != null) return homeAsset;
         String pageHost = pageHostFor(source);
@@ -1777,6 +1780,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
 
     private WebResourceResponse interceptRequest(WebView source, WebResourceRequest request) {
         Uri requestUri = request.getUrl();
+        WebResourceResponse ruleResp = applyNetRule(source, requestUri, request.isForMainFrame());
+        if (ruleResp != null) return ruleResp;
         WebResourceResponse homeAsset = interceptHomeAsset(source, requestUri);
         if (homeAsset != null) return homeAsset;
         if (customHomeViews.contains(source) && !request.isForMainFrame() && requestUri != null &&
@@ -1883,6 +1888,111 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 try { source.evaluateJavascript(script, null); } catch (RuntimeException ignored) {}
             }
         });
+    }
+
+    /** 网络规则链：block 拦截 / redirect 重写 / inject 注入 / replace 替换。无命中返回 null。 */
+    private WebResourceResponse applyNetRule(WebView source, Uri requestUri, boolean mainFrame) {
+        if (requestUri == null) return null;
+        String url = requestUri.toString();
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return null;
+        McpController.NetRule rule = McpController.get().matchNetRule(url);
+        if (rule == null) return null;
+        rule.hits++;
+        McpController.get().recordRunLog("info", "netrule", rule.type + " " + url);
+        if ("block".equals(rule.type)) {
+            return blockedResponse();
+        } else if ("redirect".equals(rule.type)) {
+            return fetchRemote(rule.target);
+        } else if (mainFrame && "inject".equals(rule.type)) {
+            return fetchTransform(url, rule.target, null, true);
+        } else if (mainFrame && "replace".equals(rule.type)) {
+            return fetchTransform(url, rule.target, rule.pattern, false);
+        }
+        return null;
+    }
+
+    /** 用 HttpURLConnection 拉取远程内容并包装为 WebResourceResponse（零依赖，IO 线程调用）。 */
+    private WebResourceResponse fetchRemote(String url) {
+        if (url == null || url.isEmpty()) return null;
+        HttpURLConnection conn = null;
+        try {
+            int hops = 0;
+            String cur = url;
+            while (true) {
+                conn = (HttpURLConnection) new URL(cur).openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("User-Agent", NET_RULE_UA);
+                int code = conn.getResponseCode();
+                if ((code == 301 || code == 302 || code == 303 || code == 307 || code == 308) && hops < 3) {
+                    String loc = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+                    if (loc == null || loc.isEmpty()) return blockedResponse();
+                    cur = new URL(new URL(cur), loc).toString();
+                    hops++;
+                    continue;
+                }
+                if (code < 200 || code >= 400) { conn.disconnect(); conn = null; return blockedResponse(); }
+                break;
+            }
+            String contentType = conn.getContentType();
+            String mime = "text/html";
+            String charset = "UTF-8";
+            if (contentType != null) {
+                String[] parts = contentType.split(";");
+                if (parts.length > 0 && !parts[0].trim().isEmpty()) mime = parts[0].trim();
+                for (String p : parts) {
+                    String t = p.trim().toLowerCase(Locale.ROOT);
+                    if (t.startsWith("charset=")) charset = t.substring("charset=".length()).trim();
+                }
+            }
+            java.io.InputStream in = conn.getInputStream();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n, total = 0, MAX = 8 * 1024 * 1024;
+            while ((n = in.read(buf)) > 0 && total < MAX) { bos.write(buf, 0, n); total += n; }
+            in.close();
+            conn.disconnect();
+            conn = null;
+            return new WebResourceResponse(mime, charset, new ByteArrayInputStream(bos.toByteArray()));
+        } catch (Exception e) {
+            if (conn != null) try { conn.disconnect(); } catch (RuntimeException ignored) {}
+            return null;
+        }
+    }
+
+    /** 拉取原始响应并变换：injectMode=true 时在 </head> 前插入 target；否则把 pattern 替换为 target。 */
+    private WebResourceResponse fetchTransform(String url, String target, String pattern, boolean injectMode) {
+        WebResourceResponse resp = fetchRemote(url);
+        if (resp == null) return null;
+        String mime = resp.getMimeType();
+        if (mime == null || !mime.toLowerCase(Locale.ROOT).contains("html")) return resp;
+        try {
+            String charset = resp.getEncoding();
+            if (charset == null || charset.isEmpty()) charset = "UTF-8";
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            java.io.InputStream in = resp.getData();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            in.close();
+            String html = new String(bos.toByteArray(), charset);
+            String out;
+            if (injectMode) {
+                String lower = html.toLowerCase(Locale.ROOT);
+                int idx = lower.lastIndexOf("</head>");
+                if (idx >= 0) out = html.substring(0, idx) + target + html.substring(idx);
+                else out = target + html;
+            } else {
+                if (pattern == null || pattern.isEmpty()) out = html;
+                else out = html.replace(pattern, target == null ? "" : target);
+            }
+            return new WebResourceResponse(mime, charset, new ByteArrayInputStream(out.getBytes(charset)));
+        } catch (Exception e) {
+            return resp;
+        }
     }
 
     private WebResourceResponse blockedResponse() {
