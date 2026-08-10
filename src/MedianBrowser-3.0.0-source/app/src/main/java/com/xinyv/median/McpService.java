@@ -274,6 +274,19 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("net_rule_remove", "按 id 删除网络规则", schema(
                 new JSONObject().put("id", prop("string", "规则 id（net_rule_list 获取）")), new String[]{"id"})));
         tools.put(tool("net_rule_clear", "清空全部网络规则", schema(null, null)));
+        tools.put(tool("browser_har", "导出抓包数据为 HAR 1.2 标准格式（entries: 请求URL/方法/时间）", schema(
+                new JSONObject().put("limit", prop("number", "最多导出条数，默认 200")), null)));
+        tools.put(tool("browser_hook", "管理持久 JS 钩子（页面加载后自动注入，可 hook fetch/XHR/console 等）：action=get 列出；action=add 添加脚本；action=remove 删除；action=clear 清空", schema(
+                new JSONObject().put("action", prop("string", "get|add|remove|clear"))
+                        .put("script", prop("string", "JS 钩子代码（action=add 时必填；会被包在 try{}catch 中执行）"))
+                        .put("id", prop("string", "钩子 id（action=remove 时必填）")),
+                new String[]{"action"})));
+        tools.put(tool("browser_fingerprint", "浏览器指纹伪装：level ∈ off（关闭）| light（UA类属性）| full（含 webdriver/canvas/WebGL 全面伪装）", schema(
+                new JSONObject().put("action", prop("string", "get 或 set"))
+                        .put("level", prop("string", "off/light/full（action=set 时必填）")),
+                new String[]{"action"})));
+        tools.put(tool("browser_packet_analyze", "抓包 AI 启发式分析：汇总请求数/域名分布/方法分布/主框架/敏感路径/可疑外联/时间跨度，供外部 AI 直接消费", schema(
+                new JSONObject().put("limit", prop("number", "参与分析的最近请求数，默认全部")), null)));
         tools.put(tool("browser_perf", "读取页面性能指标（FCP、DOM 大小、资源数量等）", schema(null, null)));
         tools.put(tool("browser_report", "生成综合诊断报告（页面、Console、Network、性能汇总）", schema(null, null)));
         tools.put(tool("browser_history", "读取浏览历史", schema(null, null)));
@@ -354,6 +367,10 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("net_rule_list".equals(name)) return netRuleList();
             if ("net_rule_remove".equals(name)) return netRuleRemove(args);
             if ("net_rule_clear".equals(name)) return netRuleClear();
+            if ("browser_har".equals(name)) return har(args);
+            if ("browser_hook".equals(name)) return hook(args);
+            if ("browser_fingerprint".equals(name)) return fingerprint(args);
+            if ("browser_packet_analyze".equals(name)) return packetAnalyze(args);
             if ("browser_perf".equals(name)) return perf();
             if ("browser_report".equals(name)) return report();
             if ("browser_history".equals(name)) return history(args);
@@ -827,6 +844,153 @@ public final class McpService implements MiniHttpServer.Handler {
 
     private JSONObject netRuleClear() throws Exception {
         return new JSONObject().put("cleared", ctl.clearNetRules());
+    }
+
+    private JSONObject har(JSONObject args) throws Exception {
+        int limit = Math.max(1, Math.min(args.optInt("limit", 200), 500));
+        List<JSONObject> all = ctl.networkSnapshot();
+        int from = Math.max(0, all.size() - limit);
+        JSONObject har = new JSONObject();
+        har.put("log", new JSONObject().put("version", "1.2").put("creator",
+                new JSONObject().put("name", "MedianBrowser MCP").put("version", "3.0"))
+                .put("entries", entriesJson(all, from)));
+        return har;
+    }
+
+    private JSONArray entriesJson(List<JSONObject> logs, int from) throws Exception {
+        JSONArray arr = new JSONArray();
+        for (int i = from; i < logs.size(); i++) {
+            JSONObject e = logs.get(i);
+            JSONObject entry = new JSONObject();
+            entry.put("startedDateTime", java.time.Instant.ofEpochMilli(e.optLong("time"))
+                    .toString().replace("Z", "+00:00"));
+            entry.put("time", 0);
+            JSONObject req = new JSONObject();
+            req.put("method", e.optString("method", "GET"));
+            req.put("url", e.optString("url", ""));
+            req.put("httpVersion", "HTTP/2");
+            JSONObject headers = new JSONObject();
+            headers.put("mainFrame", e.optBoolean("mainFrame", false));
+            req.put("headers", headers);
+            entry.put("request", req);
+            entry.put("response", new JSONObject().put("status", 0).put("statusText", "").put("httpVersion", "")
+                    .put("headers", new JSONObject()).put("content", new JSONObject().put("size", 0)).put("mimeType", ""));
+            entry.put("cache", new JSONObject());
+            entry.put("timings", new JSONObject().put("send", 0).put("wait", 0).put("receive", 0));
+            arr.put(entry);
+        }
+        return arr;
+    }
+
+    private JSONObject hook(JSONObject args) throws Exception {
+        String action = args.optString("action", "get");
+        if ("add".equals(action)) {
+            String script = args.optString("script", "");
+            JSONObject h = ctl.addJsHook(script, true);
+            if (h == null) return error("script required");
+            return h;
+        } else if ("remove".equals(action)) {
+            String id = args.optString("id", "");
+            if (id.isEmpty()) return error("id required");
+            return new JSONObject().put("removed", ctl.removeJsHook(id));
+        } else if ("clear".equals(action)) {
+            return new JSONObject().put("cleared", ctl.clearJsHooks());
+        }
+        return new JSONObject().put("count", ctl.jsHookSnapshot().length()).put("hooks", ctl.jsHookSnapshot());
+    }
+
+    private JSONObject fingerprint(JSONObject args) throws Exception {
+        String action = args.optString("action", "get");
+        if ("set".equals(action)) {
+            String level = args.optString("level", "off");
+            ctl.setFingerprintLevel(level);
+            return new JSONObject().put("level", ctl.fingerprintLevel()).put("applied", true);
+        }
+        return new JSONObject().put("level", ctl.fingerprintLevel())
+                .put("script", ctl.fingerprintScript().length() > 400 ? ctl.fingerprintScript().substring(0, 400) + "..." : ctl.fingerprintScript());
+    }
+
+    private JSONObject packetAnalyze(JSONObject args) throws Exception {
+        int limit = Math.max(1, Math.min(args.optInt("limit", 1000), 2000));
+        List<JSONObject> all = ctl.networkSnapshot();
+        int from = Math.max(0, all.size() - limit);
+        java.util.Map<String, Integer> hosts = new java.util.LinkedHashMap<String, Integer>();
+        java.util.Map<String, Integer> methods = new java.util.LinkedHashMap<String, Integer>();
+        java.util.Map<String, Integer> frames = new java.util.LinkedHashMap<String, Integer>();
+        java.util.ArrayList<String> sensitive = new java.util.ArrayList<String>();
+        java.util.ArrayList<String> suspicious = new java.util.ArrayList<String>();
+        long first = 0, last = 0;
+        int total = 0;
+        java.util.Set<String> urlSet = new java.util.LinkedHashSet<String>();
+        for (int i = from; i < all.size(); i++) {
+            JSONObject e = all.get(i);
+            total++;
+            String url = e.optString("url", "");
+            String host = hostOfUrl(url);
+            inc(hosts, host.isEmpty() ? "(unknown)" : host);
+            inc(methods, e.optString("method", "GET"));
+            inc(frames, e.optBoolean("mainFrame", false) ? "main" : "sub");
+            urlSet.add(url);
+            long t = e.optLong("time");
+            if (first == 0 || t < first) first = t;
+            if (t > last) last = t;
+            String low = url.toLowerCase(java.util.Locale.ROOT);
+            if (low.contains("login") || low.contains("password") || low.contains("token")
+                    || low.contains("auth") || low.contains("secret") || low.contains("session")
+                    || low.contains("admin") || low.contains("upload") || low.contains("api/")) {
+                sensitive.add(url.length() > 180 ? url.substring(0, 180) : url);
+            }
+            if (isSuspiciousUrl(url)) suspicious.add(url.length() > 180 ? url.substring(0, 180) : url);
+        }
+        JSONObject out = new JSONObject();
+        out.put("summary", new JSONObject().put("totalRequests", total).put("uniqueUrls", urlSet.size())
+                .put("spanMs", last - first));
+        JSONObject hostObj = new JSONObject();
+        for (java.util.Map.Entry<String, Integer> en : hosts.entrySet()) hostObj.put(en.getKey(), en.getValue());
+        out.put("hosts", hostObj);
+        JSONObject methodObj = new JSONObject();
+        for (java.util.Map.Entry<String, Integer> en : methods.entrySet()) methodObj.put(en.getKey(), en.getValue());
+        out.put("methods", methodObj);
+        JSONObject frameObj = new JSONObject();
+        for (java.util.Map.Entry<String, Integer> en : frames.entrySet()) frameObj.put(en.getKey(), en.getValue());
+        out.put("frames", frameObj);
+        JSONArray sens = new JSONArray();
+        for (String s : sensitive) sens.put(s);
+        out.put("sensitiveUrls", sens);
+        JSONArray susp = new JSONArray();
+        for (String s : suspicious) susp.put(s);
+        out.put("suspiciousUrls", susp);
+        out.put("note", "sensitiveUrls=含 login/password/token/auth/api 等敏感路径; suspiciousUrls=可疑外联（IP直连/非常规端口/可疑域名特征），供 AI 分析。");
+        return out;
+    }
+
+    private void inc(java.util.Map<String, Integer> m, String k) {
+        Integer v = m.get(k);
+        m.put(k, v == null ? 1 : v + 1);
+    }
+
+    private String hostOfUrl(String url) {
+        try {
+            java.net.URI u = new java.net.URI(url);
+            String h = u.getHost();
+            return h == null ? "" : h;
+        } catch (Exception e) { return ""; }
+    }
+
+    private boolean isSuspiciousUrl(String url) {
+        String low = url.toLowerCase(java.util.Locale.ROOT);
+        try {
+            java.net.URI u = new java.net.URI(url);
+            String host = u.getHost();
+            if (host == null) return false;
+            String h = host.toLowerCase(java.util.Locale.ROOT);
+            int port = u.getPort();
+            if (port > 0 && port != 80 && port != 443) return true;
+            if (h.matches("^\\d{1,3}(\\.\\d{1,3}){3}$")) return true;
+            if (h.endsWith(".xyz") || h.endsWith(".top") || h.endsWith(".click")
+                    || h.endsWith(".tk") || h.endsWith(".ml") || h.endsWith(".ga") || h.endsWith(".cf")) return true;
+        } catch (Exception e) { return false; }
+        return low.contains("phpinfo") || low.contains("eval(") || low.contains("base64");
     }
 
     private JSONObject network() throws Exception {
