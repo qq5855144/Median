@@ -10,7 +10,6 @@ import org.json.JSONTokener;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -67,13 +66,16 @@ final class UserScriptStore {
     private static final String PREFS = "median_scripts_v2";
     private static final String KEY = "scripts";
     private final SharedPreferences prefs;
-    private final Context appContext;
+    private final Map<String, String> assetScripts;
     private final ArrayList<Script> cache = new ArrayList<Script>();
     private final LinkedHashMap<String, List<Script>> matchCache = new LinkedHashMap<String, List<Script>>(32, .75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, List<Script>> eldest) { return size() > 32; }
     };
     UserScriptStore(Context context) {
-        appContext = context.getApplicationContext();
+        this(context, null);
+    }
+    UserScriptStore(Context context, Map<String, String> assetScripts) {
+        this.assetScripts = assetScripts;
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         loadCache();
     }
@@ -519,7 +521,7 @@ final class UserScriptStore {
                 script.downloadUrl = object.optString("downloadUrl", "");
                 script.runAt = object.optString("runAt", "document-end");
                 script.code = decompressFromStore(object.optString("code", ""));
-                String assetCode = readDsppAsset(script.sourceUrl);
+                String assetCode = assetScripts == null ? null : assetScripts.get(script.sourceUrl);
                 if (assetCode != null && assetCode.length() > 0) script.code = assetCode;
                 script.requireCode = object.optString("requireCode", "");
                 if (script.code.length() > 1024 * 1024 || script.requireCode.length() > 1024 * 1024) continue;
@@ -808,33 +810,8 @@ final class UserScriptStore {
         if (value == null) return "";
         return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ").replace("\r", " ");
     }
-    /** 大脚本压缩存储（GZIP+Base64 加前缀），避免超大字符串写入 SharedPreferences 时损坏/截断。 */
+/** 大脚本压缩存储（GZIP+Base64 加前缀），避免超大字符串写入 SharedPreferences 时损坏/截断。 */
     private static final int COMPRESS_THRESHOLD = 64 * 1024;
-
-    /** 内置 DeepSeek++ 脚本直接从 assets 读取（绕开 prefs 大脚本存储损坏问题，升级 APK 即自动生效）。 */
-    private String readDsppAsset(String sourceUrl) {
-        if (sourceUrl == null || appContext == null) return null;
-        String assetPath = null;
-        if ("asset://median/dspp-mainworld".equals(sourceUrl)) assetPath = "dspp/dspp_mainworld.js";
-        else if ("asset://median/dspp-content".equals(sourceUrl)) assetPath = "dspp/dspp_content.js";
-        if (assetPath == null) return null;
-        try {
-            InputStream in = appContext.getAssets().open(assetPath);
-            try {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                return new String(out.toByteArray(), "UTF-8");
-            } finally {
-                in.close();
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-
     private static String compressForStore(String code) {
         if (code == null || code.length() == 0) return code == null ? "" : code;
         if (code.length() <= COMPRESS_THRESHOLD) return code;
