@@ -414,8 +414,11 @@ public final class McpController {
         }
         return new JSONObject().put("error", "server not found: " + name);
     }
-    /** UI 面板探测入口：探测指定远端 MCP 服务器并返回 JSON 字符串结果。 */
+    /** UI 面板探测入口：探测指定远端 MCP 服务器并返回 JSON 字符串结果。MCP 服务未运行时自动启动。 */
     public String remoteDiscoverForUi(String serverName) {
+        if (service == null && appContext != null) {
+            try { start(appContext); } catch (Exception ignored) { }
+        }
         if (service == null) return "{\"error\":\"MCP service not running\"}";
         return service.discoverForUi(serverName);
     }
