@@ -8,6 +8,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -15,6 +17,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 final class UserScriptStore {
     static final class Script {
@@ -512,7 +516,7 @@ final class UserScriptStore {
                 script.updateUrl = object.optString("updateUrl", "");
                 script.downloadUrl = object.optString("downloadUrl", "");
                 script.runAt = object.optString("runAt", "document-end");
-                script.code = object.optString("code", "");
+                script.code = decompressFromStore(object.optString("code", ""));
                 script.requireCode = object.optString("requireCode", "");
                 if (script.code.length() > 1024 * 1024 || script.requireCode.length() > 1024 * 1024) continue;
                 script.noFrames = object.optBoolean("noFrames", false);
@@ -556,7 +560,7 @@ final class UserScriptStore {
                 object.put("updateUrl", script.updateUrl);
                 object.put("downloadUrl", script.downloadUrl);
                 object.put("runAt", script.runAt);
-                object.put("code", script.code);
+                object.put("code", compressForStore(script.code));
                 object.put("requireCode", script.requireCode);
                 object.put("noFrames", script.noFrames);
                 object.put("enabled", script.enabled);
@@ -799,5 +803,39 @@ final class UserScriptStore {
     private static String escapeForSingle(String value) {
         if (value == null) return "";
         return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ").replace("\r", " ");
+    }
+
+    /** 大脚本压缩存储（GZIP+Base64 加前缀），避免超大字符串写入 SharedPreferences 时损坏/截断。 */
+    private static final int COMPRESS_THRESHOLD = 64 * 1024;
+
+    private static String compressForStore(String code) {
+        if (code == null || code.length() == 0) return code == null ? "" : code;
+        if (code.length() <= COMPRESS_THRESHOLD) return code;
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            GZIPOutputStream gz = new GZIPOutputStream(bos);
+            gz.write(code.getBytes("UTF-8"));
+            gz.close();
+            return "gz1:" + java.util.Base64.getEncoder().encodeToString(bos.toByteArray());
+        } catch (Exception e) {
+            return code;
+        }
+    }
+
+    private static String decompressFromStore(String stored) {
+        if (stored == null || stored.length() == 0) return "";
+        if (!stored.startsWith("gz1:")) return stored;
+        try {
+            byte[] data = java.util.Base64.getDecoder().decode(stored.substring(4));
+            GZIPInputStream gz = new GZIPInputStream(new ByteArrayInputStream(data));
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = gz.read(buf)) > 0) bos.write(buf, 0, n);
+            gz.close();
+            return new String(bos.toByteArray(), "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
     }
 }
