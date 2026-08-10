@@ -68,6 +68,8 @@ jobs:
             src/MedianBrowser-3.0.0-source/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/
 
       - name: Lint, unit tests and build (debug APK + release APK/AAB)
+        env:
+          MEDIAN_BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
 
       - name: Collect artifacts & checksums
