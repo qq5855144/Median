@@ -74,7 +74,9 @@ jobs:
         run: |
           mkdir -p artifacts
           cp app/build/outputs/apk/debug/app-debug.apk artifacts/MedianBrowser-3.0.0-debug.apk
-          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk artifacts/MedianBrowser-3.0.0-release.apk
+          elif [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
             cp app/build/outputs/apk/release/app-release-unsigned.apk artifacts/MedianBrowser-3.0.0-release-unsigned.apk
           fi
           cp app/build/outputs/bundle/release/app-release.aab artifacts/MedianBrowser-3.0.0-release.aab
