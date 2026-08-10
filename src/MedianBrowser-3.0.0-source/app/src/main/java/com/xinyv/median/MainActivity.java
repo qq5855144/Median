@@ -3297,11 +3297,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "个性化主页",
                 "清空浏览历史",
                 "打开本地快速主页",
+                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
                 "关于 Median"
         };
         int[] icons = new int[] { BrowserIconView.SHIELD, BrowserIconView.SHIELD, BrowserIconView.SHIELD,
                 BrowserIconView.TABS, BrowserIconView.SEARCH, BrowserIconView.SEARCH, BrowserIconView.HOME,
-                BrowserIconView.CLOSE, BrowserIconView.HOME, BrowserIconView.INFO };
+                BrowserIconView.CLOSE, BrowserIconView.HOME, BrowserIconView.SCRIPT, BrowserIconView.INFO };
         showActionSheet("浏览器设置", "隐私优先 · 设置仅保存在本机", items, icons, new SheetHandler() {
             @Override public void onItem(int which) {
                 if (which == 0) { httpsOnly = !httpsOnly; prefs.edit().putBoolean("https_only", httpsOnly).apply(); }
@@ -3321,11 +3322,28 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 else if (which == 6) showHomeCustomization();
                 else if (which == 7) confirmClearHistory();
                 else if (which == 8) showHome();
+                else if (which == 9) toggleDeepSeekPP();
                 else showAbout();
             }
         });
     }
 
+    private void toggleDeepSeekPP() {
+        final boolean enable = !DeepSeekPP.isEnabled(this);
+        try {
+            if (enable) {
+                if (scriptStore == null) scriptStore = new UserScriptStore(this);
+                DeepSeekPP.install(this, scriptStore);
+            } else {
+                DeepSeekPP.uninstall(scriptStore);
+            }
+            DeepSeekPP.setEnabled(this, enable);
+            toast(enable ? "DeepSeek++ 模式已开启，访问 chat.deepseek.com 生效" : "DeepSeek++ 模式已关闭");
+            if (isHomeUrl(currentPageUrl)) showHome();
+        } catch (Exception e) {
+            toast("DeepSeek++ 切换失败：" + (e.getMessage() == null ? e.toString() : e.getMessage()));
+        }
+    }
     private void showHomeCustomization() {
         if (!isHomeUrl(currentPageUrl)) showHome();
         final HomePageConfig value = homePageConfig();
