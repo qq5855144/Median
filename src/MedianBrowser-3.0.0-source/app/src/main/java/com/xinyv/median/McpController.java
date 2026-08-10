@@ -270,13 +270,14 @@ public final class McpController {
         public final String id;
         public final String type;      // block | redirect | inject | replace
         public final String pattern;   // URL 子串匹配（不区分大小写）
-        public final String target;    // redirect: 目标URL; inject: 注入HTML; replace: 替换文本
+        public final String match;     // replace: 响应体中的被替换文本（null=用 pattern）
+        public final String target;    // redirect: 目标URL; inject: 注入HTML; replace: 替换后的文本
         public final boolean enabled;
         public volatile long hits;
         public final long createdAt;
-        NetRule(String id, String type, String pattern, String target, boolean enabled) {
+        NetRule(String id, String type, String pattern, String match, String target, boolean enabled) {
             this.id = id; this.type = type; this.pattern = pattern;
-            this.target = target; this.enabled = enabled;
+            this.match = match; this.target = target; this.enabled = enabled;
             this.hits = 0L; this.createdAt = System.currentTimeMillis();
         }
     }
@@ -284,24 +285,26 @@ public final class McpController {
     private long netRuleSeq = 0;
 
     /** 添加网络规则，返回规则 JSON（含 id）。type ∈ block|redirect|inject|replace。 */
-    public JSONObject addNetRule(String type, String pattern, String target, boolean enabled) {
+    public JSONObject addNetRule(String type, String pattern, String match, String target, boolean enabled) {
         String t = type == null ? "" : type.trim().toLowerCase(java.util.Locale.ROOT);
         if (!("block".equals(t) || "redirect".equals(t) || "inject".equals(t) || "replace".equals(t)))
             return null;
         if (pattern == null || pattern.trim().isEmpty()) return null;
         if (("redirect".equals(t) || "inject".equals(t) || "replace".equals(t)) && target == null)
             return null;
+        String matchTrim = (match == null || match.trim().isEmpty()) ? null : match;
         String id;
         synchronized (netRules) {
             netRuleSeq++;
             id = "r" + netRuleSeq + "_" + Long.toHexString(System.currentTimeMillis() & 0xffffff);
-            NetRule rule = new NetRule(id, t, pattern.trim(), target == null ? "" : target, enabled);
+            NetRule rule = new NetRule(id, t, pattern.trim(), matchTrim, target == null ? "" : target, enabled);
             netRules.add(rule);
             bump("netrule");
         }
         JSONObject o = new JSONObject();
         try {
             o.put("id", id).put("type", t).put("pattern", pattern.trim())
+             .put("match", matchTrim == null ? "" : matchTrim)
              .put("target", target == null ? "" : target).put("enabled", enabled).put("hits", 0L);
         } catch (Exception ignored) {}
         return o;
@@ -334,6 +337,7 @@ public final class McpController {
                 JSONObject o = new JSONObject();
                 try {
                     o.put("id", r.id).put("type", r.type).put("pattern", r.pattern)
+                     .put("match", r.match == null ? "" : r.match)
                      .put("target", r.target).put("enabled", r.enabled).put("hits", r.hits);
                 } catch (Exception ignored) {}
                 arr.put(o);
