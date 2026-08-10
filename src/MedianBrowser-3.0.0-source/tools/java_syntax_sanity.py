@@ -19,7 +19,12 @@ def check(path: Path):
         if state == 'code':
             if c == '/' and n == '/': state = 'line'; i += 1
             elif c == '/' and n == '*': state = 'block'; i += 1
-            elif c == '"': state = 'string'
+            elif c == '"':
+                if n == '"' and i + 2 < len(text) and text[i + 2] == '"':
+                    state = 'textblock'
+                    i += 2
+                else:
+                    state = 'string'
             elif c == "'": state = 'char'
             elif c in OPEN: stack.append((c, line))
             elif c in PAIRS:
@@ -30,6 +35,10 @@ def check(path: Path):
             if c == '\n': state = 'code'
         elif state == 'block':
             if c == '*' and n == '/': state = 'code'; i += 1
+        elif state == 'textblock':
+            if c == '"' and n == '"' and i + 2 < len(text) and text[i + 2] == '"':
+                state = 'code'
+                i += 2
         elif state in ('string', 'char'):
             if c == '\\': i += 1
             elif (state == 'string' and c == '"') or (state == 'char' and c == "'"):
