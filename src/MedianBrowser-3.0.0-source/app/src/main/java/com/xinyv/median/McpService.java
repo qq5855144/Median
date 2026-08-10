@@ -666,7 +666,7 @@ public final class McpService implements MiniHttpServer.Handler {
         return out;
     }
     /** 转发工具调用到远端 MCP 服务器。 */
-    private JSONObject forwardRemoteCall(RemoteToolRef ref, JSONObject args) {
+    private JSONObject forwardRemoteCall(RemoteToolRef ref, JSONObject args) throws Exception {
         JSONObject params = new JSONObject();
         params.put("name", ref.tool);
         params.put("arguments", args);
