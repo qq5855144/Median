@@ -266,7 +266,8 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_network", "读取页面网络请求记录（URL、类型、主框架、时间）与资源性能条目", schema(null, null)));
         tools.put(tool("net_rule_add", "添加网络规则：block=拦截请求返回空响应; redirect=将请求重写到目标URL; inject=在主框架HTML的</head>前注入片段; replace=替换主框架HTML中的文本", schema(
                 new JSONObject().put("type", prop("string", "block|redirect|inject|replace"))
-                        .put("pattern", prop("string", "URL 子串（不区分大小写），replace 时同时作为被替换文本"))
+                        .put("pattern", prop("string", "URL 子串（不区分大小写）"))
+                        .put("match", prop("string", "可选，replace 类型专用：响应体中要替换的文本（缺省用 pattern）"))
                         .put("target", prop("string", "redirect: 目标URL; inject: 注入的HTML/JS片段; replace: 替换后的文本"))
                         .put("enabled", prop("boolean", "是否启用，默认 true")),
                 new String[]{"type", "pattern"})));
@@ -825,9 +826,10 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject netRuleAdd(JSONObject args) throws Exception {
         String type = args.optString("type", "");
         String pattern = args.optString("pattern", "");
+        String match = args.has("match") ? args.optString("match", "") : null;
         String target = args.has("target") ? args.optString("target", "") : null;
         boolean enabled = args.optBoolean("enabled", true);
-        JSONObject rule = ctl.addNetRule(type, pattern, target, enabled);
+        JSONObject rule = ctl.addNetRule(type, pattern, match, target, enabled);
         if (rule == null) return error("invalid rule: type must be block|redirect|inject|replace, pattern required");
         return rule;
     }
