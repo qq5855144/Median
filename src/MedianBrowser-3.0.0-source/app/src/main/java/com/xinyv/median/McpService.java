@@ -492,7 +492,7 @@ public final class McpService implements MiniHttpServer.Handler {
         if ("discover".equals(action)) {
             return mcpDiscover(args);
         }
-        return ctl.remoteMcpList(ctx);
+        return new JSONObject().put("ok", true).put("servers", ctl.remoteMcpList(ctx));
     }
     /** mcp_discover：探测远端服务器工具列表并缓存。 */
     private JSONObject mcpDiscover(JSONObject args) throws Exception {
