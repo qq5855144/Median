@@ -424,17 +424,19 @@ public final class McpController {
         return arr;
     }
 
-    /** 匹配首个启用的规则（URL 子串，不区分大小写）；无命中返回 null。 */
-    public NetRule matchNetRule(String url) {
-        if (url == null) return null;
+    /** 匹配所有启用的规则（URL 子串，不区分大小写），按添加顺序返回；无命中返回空列表。
+     *  多条规则可同时命中：block 优先拦截，redirect 独立重定向，inject/replace 可叠加变换。 */
+    public java.util.List<NetRule> matchNetRules(String url) {
+        if (url == null) return java.util.Collections.emptyList();
         String u = url.toLowerCase(java.util.Locale.ROOT);
+        java.util.ArrayList<NetRule> out = new java.util.ArrayList<NetRule>();
         synchronized (netRules) {
             for (NetRule r : netRules) {
                 if (r.enabled && r.pattern != null && !r.pattern.isEmpty() &&
-                        u.contains(r.pattern.toLowerCase(java.util.Locale.ROOT))) return r;
+                        u.contains(r.pattern.toLowerCase(java.util.Locale.ROOT))) out.add(r);
             }
         }
-        return null;
+        return out;
     }
 
     // ==================== 持久 JS 钩子（页面加载后自动注入） ====================

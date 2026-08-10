@@ -1909,27 +1909,48 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
     }
 
-    /** 网络规则链：block 拦截 / redirect 重写 / inject 注入 / replace 替换。无命中返回 null。 */
+    /** 网络规则链：block 拦截 / redirect 重写 / inject 注入 / replace 替换。
+     *  多条规则可同时命中：block 优先，redirect 独立，inject+replace 叠加变换（一次拉取）。 */
     private WebResourceResponse applyNetRule(WebView source, Uri requestUri, boolean mainFrame) {
         if (requestUri == null) return null;
         String url = requestUri.toString();
         if (!url.startsWith("http://") && !url.startsWith("https://")) return null;
-        McpController.NetRule rule = McpController.get().matchNetRule(url);
-        if (rule == null) return null;
-        rule.hits++;
-        McpController.get().recordRunLog("info", "netrule", rule.type + " " + url);
-        if ("block".equals(rule.type)) {
-            return blockedResponse();
-        } else if ("redirect".equals(rule.type)) {
-            Fetched f = fetchRemoteBytes(rule.target);
-            if (f == null) return null;
-            attachBody(url, f);
-            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
-        } else if (mainFrame && "inject".equals(rule.type)) {
-            return fetchTransform(url, rule.target, null, true);
-        } else if (mainFrame && "replace".equals(rule.type)) {
-            String matchText = rule.match != null ? rule.match : rule.pattern;
-            return fetchTransform(url, rule.target, matchText, false);
+        java.util.List<McpController.NetRule> rules = McpController.get().matchNetRules(url);
+        if (rules.isEmpty()) return null;
+        for (McpController.NetRule rule : rules) rule.hits++;
+        // 1) block：任一命中即拦截
+        for (McpController.NetRule rule : rules) {
+            if ("block".equals(rule.type)) {
+                McpController.get().recordRunLog("info", "netrule", rule.type + " " + url);
+                return blockedResponse();
+            }
+        }
+        // 2) redirect：命中即整体重定向到目标
+        for (McpController.NetRule rule : rules) {
+            if ("redirect".equals(rule.type)) {
+                McpController.get().recordRunLog("info", "netrule", rule.type + " " + url);
+                Fetched f = fetchRemoteBytes(rule.target);
+                if (f == null) return null;
+                attachBody(url, f);
+                return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
+            }
+        }
+        // 3) inject / replace：主框架请求叠加变换（一次拉取，按添加顺序依次应用）
+        if (mainFrame) {
+            Fetched g = null;
+            for (McpController.NetRule rule : rules) {
+                if ("inject".equals(rule.type) || "replace".equals(rule.type)) {
+                    if (g == null) g = fetchRemoteBytes(url);
+                    if (g == null) return null;
+                    McpController.get().recordRunLog("info", "netrule", rule.type + " " + url);
+                    g = applyTransform(g, rule);
+                }
+            }
+            if (g != null) {
+                attachBody(url, g);
+                return new WebResourceResponse(g.mime, g.charset,
+                        new ByteArrayInputStream(g.body == null ? EMPTY_RESPONSE : g.body));
+            }
         }
         return null;
     }
@@ -2015,33 +2036,30 @@ public final class MainActivity extends Activity implements McpController.UiBind
         return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
     }
 
-    /** 拉取原始响应并变换：injectMode=true 时在 </head> 前插入 target；否则把 pattern 替换为 target。 */
-    private WebResourceResponse fetchTransform(String url, String target, String pattern, boolean injectMode) {
-        Fetched f = fetchRemoteBytes(url);
-        if (f == null) return null;
+    /** 对已拉取的响应应用单条变换规则：injectMode 在 </head> 前插入 target；replace 把 match/pattern 替换为 target。
+     *  仅对 HTML 生效，其余类型原样返回。 */
+    private Fetched applyTransform(Fetched f, McpController.NetRule rule) {
+        if (f == null || f.body == null) return f;
         String mime = f.mime;
-        if (mime == null || !mime.toLowerCase(Locale.ROOT).contains("html")) {
-            attachBody(url, f);
-            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
-        }
+        if (mime == null || !mime.toLowerCase(Locale.ROOT).contains("html")) return f;
         try {
-            String html = new String(f.body, f.charset);
+            java.nio.charset.Charset cs;
+            try { cs = java.nio.charset.Charset.forName(f.charset); } catch (Exception e) { cs = StandardCharsets.UTF_8; }
+            String html = new String(f.body, cs);
             String out;
-            if (injectMode) {
+            if ("inject".equals(rule.type)) {
                 String lower = html.toLowerCase(Locale.ROOT);
                 int idx = lower.lastIndexOf("</head>");
-                if (idx >= 0) out = html.substring(0, idx) + target + html.substring(idx);
-                else out = target + html;
+                if (idx >= 0) out = html.substring(0, idx) + rule.target + html.substring(idx);
+                else out = rule.target + html;
             } else {
+                String pattern = rule.match != null && !rule.match.isEmpty() ? rule.match : rule.pattern;
                 if (pattern == null || pattern.isEmpty()) out = html;
-                else out = html.replace(pattern, target == null ? "" : target);
+                else out = html.replace(pattern, rule.target == null ? "" : rule.target);
             }
-            byte[] outBytes = out.getBytes(f.charset);
-            attachBody(url, new Fetched(f.status, f.mime, f.charset, outBytes));
-            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(outBytes));
+            return new Fetched(f.status, f.mime, f.charset, out.getBytes(cs));
         } catch (Exception e) {
-            attachBody(url, f);
-            return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
+            return f;
         }
     }
 
