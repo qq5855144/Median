@@ -663,7 +663,7 @@ public final class McpService implements MiniHttpServer.Handler {
             if(el.selectionStart!==undefined&&el.selectionStart!==null){var v3=el.value||'';el.setSelectionRange(v3.length,v3.length);handled=true;}
             else{window.scrollBy(0,120);handled=true;}
             }
-            else if(k==='a'&&opts.ctrlKey){
+            else if((k==='a'||k==='A')&&opts.ctrlKey){
             if(el.select)el.select();
             handled=true;
             }
