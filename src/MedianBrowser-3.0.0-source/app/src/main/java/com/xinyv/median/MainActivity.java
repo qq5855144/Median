@@ -2221,7 +2221,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
     }
 
-    private void showHome() {
+    @Override
+    public void showHome() {
         currentPageUrl = HOME_URL;
         trustedHomeViews.add(webView);
         HomePageConfig config = homePageConfig();

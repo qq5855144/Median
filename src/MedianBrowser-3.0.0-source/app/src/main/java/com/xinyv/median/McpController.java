@@ -56,6 +56,7 @@ public final class McpController {
         void newTab(String url);     // 新建标签并激活
         void closeCurrentTab();      // 关闭当前标签
         void switchTab(int index);   // 切换标签
+        void showHome();             // 返回浏览器主页（内部渲染，不走网络）
         int currentTabIndex();       // 当前激活标签索引
         JSONObject settingsSnapshot();   // 浏览器设置快照（夜间/拦截/性能/引擎/UA）
         String applySetting(String key, String value); // 修改设置，null=成功
@@ -103,6 +104,7 @@ public final class McpController {
     public void newTab(String url) { if (bindings != null) bindings.newTab(url); }
     public void closeCurrentTab() { if (bindings != null) bindings.closeCurrentTab(); }
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }
+    public void showHome() { if (bindings != null) bindings.showHome(); }
     public JSONObject settingsSnapshot() { return bindings == null ? null : bindings.settingsSnapshot(); }
     public String applySetting(final String key, final String value) {
         if (bindings == null) return "mcp not attached";

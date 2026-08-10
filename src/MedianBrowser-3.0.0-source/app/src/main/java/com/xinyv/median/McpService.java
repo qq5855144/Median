@@ -799,7 +799,7 @@ public final class McpService implements MiniHttpServer.Handler {
                     } else if ("reload".equals(action)) {
                         wv.reload();
                     } else if ("home".equals(action)) {
-                        wv.loadUrl("https://median.invalid/");
+                        ctl.showHome();
                     } else {
                         return false;
                     }
