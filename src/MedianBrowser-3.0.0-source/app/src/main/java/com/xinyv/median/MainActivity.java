@@ -1036,6 +1036,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 if (refreshButton != null) refreshButton.animate().rotation(0f).setDuration(120L).start();
                 injectPreparedStart(navigationSequence);
                 injectPreparedEnd(navigationSequence);
+                injectMcpHooks(view);
                 if (dataStore != null && !isHomeUrl(url)) dataStore.recordVisit(view.getTitle(), url);
                 updateCurrentTab(url, view.getTitle());
                 persistSession();
@@ -1888,6 +1889,24 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 try { source.evaluateJavascript(script, null); } catch (RuntimeException ignored) {}
             }
         });
+    }
+
+    /** 页面加载完成后注入 MCP JS 钩子与指纹伪装脚本（主线程）。 */
+    private void injectMcpHooks(final WebView view) {
+        if (view == null || isHomeUrl(view.getUrl())) return;
+        final String hooks = McpController.get().activeHookScript();
+        final String fp = McpController.get().fingerprintScript();
+        if (hooks.isEmpty() && fp.isEmpty()) return;
+        final String script = fp + hooks;
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            view.evaluateJavascript(script, null);
+        } else {
+            uiHandler.post(new Runnable() {
+                @Override public void run() {
+                    if (view.getUrl() != null) view.evaluateJavascript(script, null);
+                }
+            });
+        }
     }
 
     /** 网络规则链：block 拦截 / redirect 重写 / inject 注入 / replace 替换。无命中返回 null。 */
