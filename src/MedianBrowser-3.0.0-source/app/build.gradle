@@ -3,8 +3,19 @@ plugins {
 }
 
 
-final int medianVersionCode = 74
-final String medianVersionName = '3.0.0'
+// ---- 动态版本号：基于 git commit 数递增，每次构建可区分且可覆盖安装 ----
+def gitCommitCount = { ->
+    try {
+        def p = 'git rev-list --count HEAD'.execute(null, rootProject.projectDir)
+        p.waitFor()
+        def out = p.text.trim()
+        return out ? out.toInteger() : 0
+    } catch (Exception e) {
+        return 0
+    }
+}
+final int medianVersionCode = 100 + gitCommitCount()
+final String medianVersionName = "3.0.${gitCommitCount()}"
 
 android {
     namespace 'com.xinyv.median'
