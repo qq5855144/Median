@@ -263,6 +263,98 @@ public final class McpController {
         synchronized (networkLogs) { return new ArrayList<JSONObject>(networkLogs); }
     }
     public void clearNetwork() { synchronized (networkLogs) { networkLogs.clear(); } }
+
+    // ==================== 网络规则引擎（block / redirect / inject / replace） ====================
+    /** 网络拦截/重写/注入规则。 */
+    public static final class NetRule {
+        public final String id;
+        public final String type;      // block | redirect | inject | replace
+        public final String pattern;   // URL 子串匹配（不区分大小写）
+        public final String target;    // redirect: 目标URL; inject: 注入HTML; replace: 替换文本
+        public final boolean enabled;
+        public volatile long hits;
+        public final long createdAt;
+        NetRule(String id, String type, String pattern, String target, boolean enabled) {
+            this.id = id; this.type = type; this.pattern = pattern;
+            this.target = target; this.enabled = enabled;
+            this.hits = 0L; this.createdAt = System.currentTimeMillis();
+        }
+    }
+    private final List<NetRule> netRules = Collections.synchronizedList(new ArrayList<NetRule>());
+    private long netRuleSeq = 0;
+
+    /** 添加网络规则，返回规则 JSON（含 id）。type ∈ block|redirect|inject|replace。 */
+    public JSONObject addNetRule(String type, String pattern, String target, boolean enabled) {
+        String t = type == null ? "" : type.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!("block".equals(t) || "redirect".equals(t) || "inject".equals(t) || "replace".equals(t)))
+            return null;
+        if (pattern == null || pattern.trim().isEmpty()) return null;
+        if (("redirect".equals(t) || "inject".equals(t) || "replace".equals(t)) && target == null)
+            return null;
+        String id;
+        synchronized (netRules) {
+            netRuleSeq++;
+            id = "r" + netRuleSeq + "_" + Long.toHexString(System.currentTimeMillis() & 0xffffff);
+            NetRule rule = new NetRule(id, t, pattern.trim(), target == null ? "" : target, enabled);
+            netRules.add(rule);
+            bump("netrule");
+        }
+        JSONObject o = new JSONObject();
+        try {
+            o.put("id", id).put("type", t).put("pattern", pattern.trim())
+             .put("target", target == null ? "" : target).put("enabled", enabled).put("hits", 0L);
+        } catch (Exception ignored) {}
+        return o;
+    }
+
+    /** 按 id 删除规则，返回是否删除成功。 */
+    public boolean removeNetRule(String id) {
+        if (id == null) return false;
+        synchronized (netRules) {
+            java.util.Iterator<NetRule> it = netRules.iterator();
+            while (it.hasNext()) { if (id.equals(it.next().id)) { it.remove(); return true; } }
+        }
+        return false;
+    }
+
+    /** 清空全部规则，返回清除条数。 */
+    public int clearNetRules() {
+        synchronized (netRules) {
+            int n = netRules.size();
+            netRules.clear();
+            return n;
+        }
+    }
+
+    /** 规则快照（JSONArray：id/type/pattern/target/enabled/hits）。 */
+    public org.json.JSONArray netRuleSnapshot() {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        synchronized (netRules) {
+            for (NetRule r : netRules) {
+                JSONObject o = new JSONObject();
+                try {
+                    o.put("id", r.id).put("type", r.type).put("pattern", r.pattern)
+                     .put("target", r.target).put("enabled", r.enabled).put("hits", r.hits);
+                } catch (Exception ignored) {}
+                arr.put(o);
+            }
+        }
+        return arr;
+    }
+
+    /** 匹配首个启用的规则（URL 子串，不区分大小写）；无命中返回 null。 */
+    public NetRule matchNetRule(String url) {
+        if (url == null) return null;
+        String u = url.toLowerCase(java.util.Locale.ROOT);
+        synchronized (netRules) {
+            for (NetRule r : netRules) {
+                if (r.enabled && r.pattern != null && !r.pattern.isEmpty() &&
+                        u.contains(r.pattern.toLowerCase(java.util.Locale.ROOT))) return r;
+            }
+        }
+        return null;
+    }
+
     public void clearConsole() { synchronized (consoleLogs) { consoleLogs.clear(); } }
     public void bump(String key) {
         synchronized (counters) {
