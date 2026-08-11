@@ -254,6 +254,16 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private final ConcurrentHashMap<WebView, List<ScriptHandler>> scriptHandlers = new ConcurrentHashMap<WebView, List<ScriptHandler>>();
     private final Set<WebView> documentStartScriptViews = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, HttpURLConnection> scriptConnections = new ConcurrentHashMap<String, HttpURLConnection>();
+    /** 脚本桥诊断环形缓冲（release 构建 logcat 不可见，通过 dspp_diag 远程读取） */
+    private final java.util.List<String> bridgeDiag = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+    private void bridgeDiagLog(String msg) {
+        try {
+            synchronized (bridgeDiag) {
+                bridgeDiag.add("[" + java.text.SimpleDateFormat.getTimeInstance(java.text.SimpleDateFormat.MEDIUM, java.util.Locale.US).format(new java.util.Date()) + "] " + msg);
+                while (bridgeDiag.size() > 120) bridgeDiag.remove(0);
+            }
+        } catch (RuntimeException ignored) {}
+    }
     private volatile boolean filterUpdateInProgress;
     private boolean autoPictureInPicture;
     private boolean cleanTrackingParameters;
@@ -1524,6 +1534,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 String callbackId = args.optString("i", "");
                 boolean allowed = callbackId.matches("[A-Za-z0-9_-]{1,96}") && isHttpUrl(url) &&
                         scriptStore.canConnect(scriptId, url, currentUrl);
+                bridgeDiagLog("xhr action cb=" + callbackId + " allowed=" + allowed + " url=" + url + " page=" + (currentUrl == null ? "NULL" : currentUrl) + " runnable=" + scriptStore.isRunnable(scriptId) + " match=" + scriptStore.matchesUrl(scriptId, currentUrl) + " tokenOk=" + (token.length() >= 32 && token.equals(expectedToken)));
                 if (allowed) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
                 response = allowed ? bridgeOk(true) : bridgeError("@connect denied");
             } else if ("xhrAbort".equals(action)) {
@@ -1541,9 +1552,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private void startScriptRequest(final WebView source, final String token, final String scriptId,
                                     final String callbackId, final JSONObject args, final String pageUrl) {
         if (scriptNetworkExecutor == null || scriptNetworkExecutor.isShutdown()) {
+            bridgeDiagLog("startScriptRequest SKIPPED executor=null|shutdown cb=" + callbackId);
             try { android.util.Log.d("MedianBridge", "startScriptRequest SKIPPED executor=null|shutdown cb=" + callbackId); } catch (RuntimeException ignored) {}
             return;
         }
+        bridgeDiagLog("startScriptRequest dispatch cb=" + callbackId + " url=" + args.optString("u", "") + " page=" + pageUrl);
         try { android.util.Log.d("MedianBridge", "startScriptRequest dispatch cb=" + callbackId + " url=" + args.optString("u", "") + " page=" + pageUrl); } catch (RuntimeException ignored) {}
         scriptNetworkExecutor.execute(new Runnable() {
             @Override public void run() {
@@ -1643,11 +1656,14 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     payload.put("contentType", contentType);
                     payload.put("responseText", binary ? "" : text);
                     payload.put("response", binary ? android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP) : text);
+                    bridgeDiagLog("HTTP ok status=" + status + " bytes=" + total + " cb=" + callbackId);
                     dispatchScriptEvent(source, token, scriptId, callbackId, "load", payload);
                 } catch (java.net.SocketTimeoutException timeoutError) {
+                    bridgeDiagLog("HTTP timeout cb=" + callbackId + " err=" + timeoutError);
                     dispatchScriptEvent(source, token, scriptId, callbackId, "timeout", errorPayload(timeoutError));
                 } catch (Exception error) {
                     String event = scriptConnections.containsKey(key) ? "error" : "abort";
+                    bridgeDiagLog("HTTP " + event + " cb=" + callbackId + " err=" + error);
                     dispatchScriptEvent(source, token, scriptId, callbackId, event, errorPayload(error));
                 } finally {
                     scriptConnections.remove(key);
@@ -1672,6 +1688,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 if (source == null || scriptStore == null) return;
                 String expected = scriptBridgeTokens.get(source);
                 if (expected == null || !token.equals(expected)) {
+                    bridgeDiagLog("dispatch guard FAIL expected=" + (expected != null) + " tokenEq=" + token.equals(expected) + " cb=" + callbackId + " event=" + event);
                     try { android.util.Log.d("MedianBridge", "dispatch guard FAIL expected=" + (expected != null) + " tokenEq=" + token.equals(expected) + " cb=" + callbackId + " event=" + event); } catch (RuntimeException ignored) {}
                     return;
                 }
@@ -1679,11 +1696,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 boolean urlReady = current != null && scriptStore.matchesUrl(scriptId, current);
                 // 页面导航早期 getUrl() 可能尚未就绪：延迟重试（最多约 3 秒），避免脚本侧 GM 请求永久无响应
                 if (!urlReady && attempts < 12) {
+                    bridgeDiagLog("dispatch retry attempts=" + attempts + " url=" + current + " event=" + event);
                     try { android.util.Log.d("MedianBridge", "dispatch retry attempts=" + attempts + " url=" + current + " event=" + event); } catch (RuntimeException ignored) {}
                     uiHandler.postDelayed(this, 250);
                     return;
                 }
                 if (!urlReady) {
+                    bridgeDiagLog("dispatch GIVEUP attempts=" + attempts + " url=" + current + " event=" + event);
                     try { android.util.Log.d("MedianBridge", "dispatch GIVEUP attempts=" + attempts + " url=" + current + " event=" + event); } catch (RuntimeException ignored) {}
                     return;
                 }
@@ -1691,7 +1710,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 String js = "(function(){var d=window[" + JSONObject.quote(objectName) + "];if(d&&typeof d.dispatch==='function')d.dispatch(" +
                         JSONObject.quote(token) + "," + JSONObject.quote(callbackId) + "," + JSONObject.quote(event) + "," +
                         (payload == null ? "{}" : payload.toString()) + ");})();";
-                try { source.evaluateJavascript(js, null); try { android.util.Log.d("MedianBridge", "dispatch SENT event=" + event + " cb=" + callbackId + " attempts=" + attempts); } catch (RuntimeException ignored) {} } catch (RuntimeException ignored) {}
+                try {
+                    source.evaluateJavascript(js, null);
+                    bridgeDiagLog("dispatch SENT event=" + event + " cb=" + callbackId + " attempts=" + attempts);
+                    try { android.util.Log.d("MedianBridge", "dispatch SENT event=" + event + " cb=" + callbackId + " attempts=" + attempts); } catch (RuntimeException ignored) {}
+                } catch (RuntimeException ex) {
+                    bridgeDiagLog("dispatch EVAL_EXC " + ex + " event=" + event + " cb=" + callbackId);
+                }
             }
         });
     }
@@ -7744,6 +7769,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
         JSONObject out = new JSONObject();
         try {
             out.put("enabled", DeepSeekPP.isEnabled(this));
+            JSONArray bridge = new JSONArray();
+            synchronized (bridgeDiag) {
+                for (String line : bridgeDiag) bridge.put(line);
+            }
+            out.put("bridgeDiag", bridge);
+            out.put("executorAlive", scriptNetworkExecutor != null && !scriptNetworkExecutor.isShutdown());
+            out.put("bridgeTokens", scriptBridgeTokens.size());
             Map<String, String> am = buildDsppAssetMap();
             JSONObject assetLens = new JSONObject();
             for (Map.Entry<String, String> e : am.entrySet()) {
