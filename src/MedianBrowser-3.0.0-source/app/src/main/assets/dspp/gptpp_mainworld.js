@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median ChatGPT++ MCP Bridge
 // @namespace    median.gptpp
-// @version      1.1.0
+// @version      1.2.0
 // @description  将 Median 本地 MCP 工具（fs/github/browser/remote）注入 chatgpt.com，AI 可直接调用操作设备与 GitHub
 // @match        *://chatgpt.com/*
 // @run-at       document-start
@@ -53,12 +53,14 @@
                     },
                     onerror: function () {
                         __toolsLoading = false;
+                        try { console.warn('[MedianGPT++] tools fetch error (bridge)'); } catch (e) { /* ignore */ }
                         var w = __toolsWaiters; __toolsWaiters = [];
                         for (var i = 0; i < w.length; i++) { try { w[i]([]); } catch (e) { /* ignore */ } }
                         if (cb) cb([]);
                     },
                     ontimeout: function () {
                         __toolsLoading = false;
+                        try { console.warn('[MedianGPT++] tools fetch timeout (bridge)'); } catch (e) { /* ignore */ }
                         var w = __toolsWaiters; __toolsWaiters = [];
                         for (var i = 0; i < w.length; i++) { try { w[i]([]); } catch (e) { /* ignore */ } }
                         if (cb) cb([]);
@@ -253,11 +255,11 @@
         return texts.join('');
     }
 
-    /* ---------- 注入请求体：messages 前插 system 消息 ---------- */
+    /* ---------- 注入请求体：messages / input 前插 system 消息 ---------- */
     function augmentBody(rawBody) {
         try {
             var req = JSON.parse(rawBody);
-            if (!req || !req.messages || !Array.isArray(req.messages)) return null;
+            if (!req) return null;
             var inj = '';
             if (__pendingResult) {
                 inj = '[System: 工具执行结果]\n' + __pendingResult + '\n[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。]\n';
@@ -265,21 +267,29 @@
             }
             var sysText = inj + sysPrompt();
             /* 旧版格式: {author:{role:'system'}, content:{content_type:'text', parts:[...]}} */
-            var sysMsg = {
+            var sysMsgOld = {
                 author: { role: 'system' },
                 content: { content_type: 'text', parts: [sysText] }
             };
             /* 新版格式: {role:'system', content:[{type:'input_text', text:'...'}]} */
-            var hasNewFormat = false;
-            for (var i = 0; i < req.messages.length; i++) {
-                var m = req.messages[i];
-                if (m && typeof m.role === 'string' && Array.isArray(m.content)) { hasNewFormat = true; break; }
+            var sysMsgNew = { role: 'system', content: [{ type: 'input_text', text: sysText }] };
+            if (req.messages && Array.isArray(req.messages)) {
+                var hasNewFormat = false;
+                for (var i = 0; i < req.messages.length; i++) {
+                    var m = req.messages[i];
+                    if (m && typeof m.role === 'string' && Array.isArray(m.content)) { hasNewFormat = true; break; }
+                }
+                req.messages.unshift(hasNewFormat ? sysMsgNew : sysMsgOld);
+                return JSON.stringify(req);
             }
-            if (hasNewFormat) {
-                sysMsg = { role: 'system', content: [{ type: 'input_text', text: sysText }] };
+            /* 新版 Responses-API 请求体: {model, instructions, input:[...]} */
+            if (req.input && Array.isArray(req.input)) {
+                req.input.unshift({ role: 'system', content: [{ type: 'input_text', text: sysText }] });
+                if (typeof req.instructions === 'string') req.instructions = sysText + '\n' + req.instructions;
+                else req.instructions = sysText;
+                return JSON.stringify(req);
             }
-            req.messages.unshift(sysMsg);
-            return JSON.stringify(req);
+            return null;
         } catch (e) {
             return null;
         }
@@ -341,8 +351,16 @@
     var origFetch = window.fetch;
     if (origFetch && !window.__medianGptppInstalled) {
         window.__medianGptppInstalled = true;
-        /* 页面加载即预拉工具列表（GM 桥，绕过 CSP） */
-        try { gmFetchTools(function () { console.log('[MedianGPT++] tools prefetched:', __toolsCache.length); }); } catch (e) { /* ignore */ }
+        /* 页面加载即预拉工具列表（GM 桥，绕过 CSP）——延迟发起避开导航早期 URL 未就绪窗口，失败自动重试 */
+        var __prefetchAttempts = 0;
+        function __prefetchTools() {
+            if (__toolsCache && __toolsCache.length > 0) return;
+            if (__prefetchAttempts >= 4) return;
+            __prefetchAttempts++;
+            try { gmFetchTools(function (arr) { console.log('[MedianGPT++] tools prefetched:', arr ? arr.length : 0); }); } catch (e) { /* ignore */ }
+            setTimeout(__prefetchTools, 2500);
+        }
+        setTimeout(__prefetchTools, 800);
         /* 将 body（可能为 ReadableStream）读取为字符串；无法读取返回 null */
         function readBodyAsText(input) {
             try {
@@ -378,9 +396,8 @@
                         /* 确保工具列表已就绪（GM 预取完成），再注入 */
                         return waitToolsReady().then(function () {
                             var augmented = augmentBody(text);
-                            if (augmented !== null) {
-                                init = Object.assign({}, init, { body: augmented });
-                            }
+                            /* 无论注入是否成功，都用读取到的完整文本重建 body（ReadableStream 已被消费，不能原样传递） */
+                            init = Object.assign({}, init, { body: augmented !== null ? augmented : text });
                             var p = origFetch.call(this, input, init);
                             return p.then(function (r) { return wrapFetchResponse(r); });
                         });

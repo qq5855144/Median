@@ -1662,10 +1662,20 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private void dispatchScriptEvent(final WebView source, final String token, final String scriptId,
                                      final String callbackId, final String event, final JSONObject payload) {
         uiHandler.post(new Runnable() {
+            private int attempts = 0;
             @Override public void run() {
-                String expected = source == null ? null : scriptBridgeTokens.get(source);
-                String current = source == null ? null : source.getUrl();
-                if (source == null || expected == null || !token.equals(expected) || !scriptStore.matchesUrl(scriptId, current)) return;
+                attempts++;
+                if (source == null || scriptStore == null) return;
+                String expected = scriptBridgeTokens.get(source);
+                if (expected == null || !token.equals(expected)) return;
+                String current = source.getUrl();
+                boolean urlReady = current != null && scriptStore.matchesUrl(scriptId, current);
+                // 页面导航早期 getUrl() 可能尚未就绪：延迟重试（最多约 3 秒），避免脚本侧 GM 请求永久无响应
+                if (!urlReady && attempts < 12) {
+                    uiHandler.postDelayed(this, 250);
+                    return;
+                }
+                if (!urlReady) return;
                 String objectName = UserScriptStore.dispatchObjectName(token, scriptId);
                 String js = "(function(){var d=window[" + JSONObject.quote(objectName) + "];if(d&&typeof d.dispatch==='function')d.dispatch(" +
                         JSONObject.quote(token) + "," + JSONObject.quote(callbackId) + "," + JSONObject.quote(event) + "," +
