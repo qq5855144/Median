@@ -57,7 +57,17 @@ jobs:
       - name: Lint (report even on failure)
         id: lint
         continue-on-error: true
-        run: ./gradlew --no-daemon lintDebug || true
+        run: |
+          set +e
+          ./gradlew --no-daemon lintDebug 2>&1 | tee /tmp/lint.log
+          EXIT=${PIPESTATUS[0]}
+          if [ $EXIT -ne 0 ]; then
+            echo '## Lint 失败诊断' >> "$GITHUB_STEP_SUMMARY"
+            tail -100 /tmp/lint.log >> "$GITHUB_STEP_SUMMARY"
+            echo '### lint 文本报告' >> "$GITHUB_STEP_SUMMARY"
+            head -100 app/build/reports/lint-results-debug.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with:
@@ -70,7 +80,21 @@ jobs:
       - name: Lint, unit tests and build (debug APK + release APK/AAB)
         env:
           MEDIAN_BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
+        run: |
+          set +e
+          ./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease 2>&1 | tee /tmp/gradle-build.log
+          EXIT=${PIPESTATUS[0]}
+          if [ $EXIT -ne 0 ]; then
+            echo '## Gradle 失败诊断' >> "$GITHUB_STEP_SUMMARY"
+            tail -150 /tmp/gradle-build.log >> "$GITHUB_STEP_SUMMARY"
+            echo '### lint 文本报告' >> "$GITHUB_STEP_SUMMARY"
+            head -120 app/build/reports/lint-results-debug.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY"
+            echo '### lint XML issues' >> "$GITHUB_STEP_SUMMARY"
+            grep -E 'severity="(Error|Fatal)"' app/build/reports/lint-results-debug.xml 2>/dev/null | head -40 >> "$GITHUB_STEP_SUMMARY"
+            echo '### 测试失败' >> "$GITHUB_STEP_SUMMARY"
+            grep -l 'failures="[1-9]' app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | head -5 >> "$GITHUB_STEP_SUMMARY"
+            exit $EXIT
+          fi
 
       - name: Collect artifacts & checksums
         run: |
