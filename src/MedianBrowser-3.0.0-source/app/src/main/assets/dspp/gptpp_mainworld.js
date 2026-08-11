@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median ChatGPT++ MCP Bridge
 // @namespace    median.gptpp
-// @version      1.2.0
+// @version      1.3.0
 // @description  将 Median 本地 MCP 工具（fs/github/browser/remote）注入 chatgpt.com，AI 可直接调用操作设备与 GitHub
 // @match        *://chatgpt.com/*
 // @run-at       document-start
@@ -11,6 +11,11 @@
 /* Median ChatGPT++ MCP Bridge: chatgpt.com <-> Median MCP (127.0.0.1:8788) */
 (function () {
     'use strict';
+    /* 诊断：暴露桥信息到 window（仅调试用） */
+    try {
+        window.__medianGptppDebug = { gm: typeof GM_xmlhttpRequest, prompt: typeof window.prompt, token: (typeof __mbt !== 'undefined' ? __mbt : null), scriptId: (typeof __msid !== 'undefined' ? __msid : null) };
+        console.log('[MedianGPT++] boot: gm=' + (typeof GM_xmlhttpRequest) + ' prompt=' + (typeof window.prompt) + ' url=' + String(location.href).slice(0, 80));
+    } catch (e) { /* ignore */ }
     var API = 'http://127.0.0.1:8788/mcp';
     var TOOL_CACHE_TTL = 15000;
     var __toolsCache = null;
@@ -29,6 +34,7 @@
                     return true;
                 }
                 __toolsLoading = true;
+                try { console.log('[MedianGPT++] prefetch: gm=' + (typeof GM_xmlhttpRequest) + ' loading=' + __toolsLoading); } catch (e) { /* ignore */ }
                 GM_xmlhttpRequest({
                     method: 'POST',
                     url: API,
@@ -37,6 +43,7 @@
                     timeout: 10000,
                     onload: function (r) {
                         __toolsLoading = false;
+                        try { console.log('[MedianGPT++] tools load ok'); } catch (e) { /* ignore */ }
                         try {
                             var res = JSON.parse(r.responseText || '{}');
                             var arr = (res && res.result && res.result.tools) || [];
@@ -95,7 +102,7 @@
                     finish(arr);
                 }
                 /* 兜底：3 秒后无论如何 resolve */
-                setTimeout(function () { finish(__toolsCache || []); }, 3000);
+                setTimeout(function () { try { console.log('[MedianGPT++] waitToolsReady fallback: cache=' + (__toolsCache ? __toolsCache.length : 0) + ' loading=' + __toolsLoading); } catch (e) { /* ignore */ } finish(__toolsCache || []); }, 3000);
             } catch (e) { resolve(__toolsCache || []); }
         });
     }
@@ -388,6 +395,7 @@
                 && (url.indexOf('/backend-api/') >= 0)
                 && body && (typeof body === 'string' || typeof body.getReader === 'function' || body instanceof ReadableStream);
             if (isConv && method === 'POST' && body) {
+                try { console.log('[MedianGPT++] intercept POST ' + String(url).slice(0, 120) + ' bodyType=' + (typeof body === 'string' ? 'string' : 'stream')); } catch (e) { /* ignore */ }
                 var textP = readBodyAsText(body);
                 if (textP !== null) {
                     var p0 = Promise.resolve(textP);
