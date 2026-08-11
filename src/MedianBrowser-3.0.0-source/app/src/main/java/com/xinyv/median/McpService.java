@@ -950,9 +950,9 @@ public final class McpService implements MiniHttpServer.Handler {
         if (p.startsWith("/")) return p;
         return workspaceDir() + "/" + p;
     }
-    private JSONObject storageErr() {
+    private JSONObject storageErr() throws Exception {
         return new JSONObject().put("result", new JSONObject()
-                .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
+.put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
     }
     private JSONObject workspaceInfo(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
