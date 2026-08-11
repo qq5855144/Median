@@ -2715,7 +2715,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "查看状态与统计",
                 "重启 MCP 服务",
                 "远端 MCP 服务器管理",
-                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
+                "AI++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
                 "工作区\n" + wsPath,
                 "GitHub Token 设置\n" + (getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
                         .getString("github_token", "").isEmpty() ? "未配置（配置后 AI 可操作 GitHub）" : "已配置（21 个 github_* 工具可用）")
@@ -3730,7 +3730,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 DeepSeekPP.uninstall(scriptStore);
             }
             DeepSeekPP.setEnabled(this, enable);
-            toast(enable ? "DeepSeek++ 模式已开启，访问 chat.deepseek.com 生效" : "DeepSeek++ 模式已关闭");
+            toast(enable ? "AI++ 模式已开启，访问 chat.deepseek.com / chatgpt.com 生效" : "AI++ 模式已关闭");
             refreshUserScriptRegistrations(enable);
             if (isHomeUrl(currentPageUrl)) showHome();
         } catch (Exception e) {
@@ -3743,6 +3743,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         Map<String, String> map = new HashMap<String, String>();
         map.put("asset://median/dspp-mainworld", readDsppAsset("dspp/dspp_mainworld.js"));
         map.put("asset://median/dspp-content", readDsppAsset("dspp/dspp_content.js"));
+        map.put("asset://median/gptpp-mainworld", readDsppAsset("dspp/gptpp_mainworld.js"));
         return map;
     }
     private String readDsppAsset(String path) {

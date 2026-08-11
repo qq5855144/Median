@@ -18,11 +18,10 @@ import java.util.List;
  * 两者头部均带 chrome.* -> localStorage 的移动端 shim（无 background 时降级）。
  */
 final class DeepSeekPP {
-
     static final String PREFS = "median_dspp";
     static final String PREFS_KEY = "deepseek_pp_enabled";
-    private static final String[] ASSET_NAMES = {"dspp_mainworld.js", "dspp_content.js"};
-    private static final String[] SOURCE_URLS = {"asset://median/dspp-mainworld", "asset://median/dspp-content"};
+    private static final String[] ASSET_NAMES = {"dspp_mainworld.js", "dspp_content.js", "gptpp_mainworld.js"};
+    private static final String[] SOURCE_URLS = {"asset://median/dspp-mainworld", "asset://median/dspp-content", "asset://median/gptpp-mainworld"};
 
     private DeepSeekPP() {}
 
