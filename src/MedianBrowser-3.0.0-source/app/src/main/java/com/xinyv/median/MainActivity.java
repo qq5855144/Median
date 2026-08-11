@@ -2892,7 +2892,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         toolPanelList.setVisibility(View.GONE);
         panel.addView(toolPanelList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(360), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        int panelW = Math.max(dp(200), Math.min(dp(360), getResources().getDisplayMetrics().widthPixels - dp(16)));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(panelW, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
         lp.setMargins(0, dp(70), dp(8), 0);
         rootFrame.addView(panel, lp);
         toolPanelView = panel;
@@ -2917,6 +2918,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
             @Override public void run() {
                 try {
                     if (toolPanelView == null) buildToolPanel();
+                    int panelW = Math.max(dp(200), Math.min(dp(360), getResources().getDisplayMetrics().widthPixels - dp(16)));
+                    if (toolPanelView.getLayoutParams() != null) {
+                        toolPanelView.getLayoutParams().width = panelW;
+                        toolPanelView.requestLayout();
+                    }
                     if (toolEvents.isEmpty()) {
                         toolPanelView.setVisibility(View.GONE);
                         return;
