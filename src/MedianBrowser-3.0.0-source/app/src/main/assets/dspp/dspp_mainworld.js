@@ -482,3 +482,85 @@ XMLHttpRequest.prototype.addEventListener=function(t,fn){var self=this;if(t!=='r
 })();
 /* ===== end request injection ===== */
 
+;(function(){
+if (window.__medianFetchHooked) return;
+window.__medianFetchHooked = true;
+var _fetch = window.fetch;
+if (!_fetch) return;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    if (u.indexOf('/api/v0/chat/completion') > -1 && opts && opts.method === 'POST') {
+        try {
+            var req = JSON.parse(opts.body || '{}');
+            if (req && req.prompt && typeof req.prompt === 'string') {
+                var inj = '';
+                if (window.__pendingToolResult) {
+                    inj = '[System: 工具执行结果]\n' + window.__pendingToolResult + '\n[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。]\n';
+                    window.__pendingToolResult = null;
+                }
+                req.prompt = inj + window.__toolSysPrompt() + req.prompt;
+                window.__dsppChat = { sessionId: req.chat_session_id, parentId: req.parent_message_id };
+                opts = Object.assign({}, opts, { body: JSON.stringify(req) });
+            }
+        } catch (e) {}
+        var p = _fetch.call(this, url, opts);
+        return p.then(function(res) {
+            try {
+                if (res && res.ok && res.body) {
+                    var reader = res.body.getReader();
+                    var stream = new ReadableStream({
+                        start: function(ctrl) {
+                            var buf = '';
+                            var f = '';
+                            var c = '';
+                            function pump() {
+                                reader.read().then(function(x) {
+                                    if (x.done) { try { ctrl.close(); } catch (e) {} return; }
+                                    ctrl.enqueue(x.value);
+                                    buf += new TextDecoder().decode(x.value);
+                                    var lines = buf.split('\n');
+                                    buf = lines.pop();
+                                    lines.forEach(function(l) {
+                                        if (l.indexOf('data: ') === 0) {
+                                            try {
+                                                var d = JSON.parse(l.slice(6));
+                                                if (d.p) c = d.p;
+                                                if (d.p === 'response/status' && d.v === 'FINISHED') { window.__streamDone = true; }
+                                                if (c.indexOf('fragments') > -1) {
+                                                    if (typeof d.v === 'string') { f += d.v; }
+                                                    else if (Object.prototype.toString.call(d.v) === '[object Array]') {
+                                                        d.v.forEach(function(fr) {
+                                                            if (fr && fr.content && typeof fr.content === 'string') { f += fr.content; }
+                                                        });
+                                                    }
+                                                }
+                                            } catch (e) {}
+                                        }
+                                    });
+                                    var m = f.match(/<median_tool_call>([\s\S]*?)<\/median_tool_call>/);
+                                    if (m) {
+                                        var nm = (m[1].match(/<median_name>([^<]*)<\/median_name>/) || [])[1] || '';
+                                        var argsRaw = (m[1].match(/<median_args>([\s\S]*?)<\/median_args>/) || [])[1] || '{}';
+                                        var args = {};
+                                        try { args = JSON.parse(argsRaw); } catch (e2) {}
+                                        if (nm) {
+                                            window.__toolResult = window.__runMedianTool(nm, args);
+                                            window.__pendingToolResult = JSON.stringify(window.__toolResult);
+                                            window.__scheduleAutoContinue();
+                                        }
+                                    }
+                                    pump();
+                                }).catch(function() { try { ctrl.close(); } catch (e) {} });
+                            }
+                            pump();
+                        }
+                    });
+                    return new Response(stream, { status: res.status, statusText: res.statusText, headers: res.headers });
+                }
+            } catch (e) { window.__acLog = 'FETCH-ERR:' + String(e && e.message || e); }
+            return res;
+        });
+    }
+    return _fetch.apply(this, arguments);
+};
+})();
