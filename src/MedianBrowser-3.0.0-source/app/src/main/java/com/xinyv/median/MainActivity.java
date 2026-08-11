@@ -386,12 +386,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
         // 必须持有 ACCESS_LOCAL_NETWORK 运行时权限，否则抛 "local network target denied"
         if (Build.VERSION.SDK_INT >= 36) {
             try {
-                if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+                if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
                     uiHandler.postDelayed(new Runnable() {
                         @Override public void run() {
                             try {
-                                if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
-                                    requestPermissions(new String[] { Manifest.permission.ACCESS_LOCAL_NETWORK }, 410);
+                                if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
+                                    requestPermissions(new String[] { "android.permission.ACCESS_LOCAL_NETWORK" }, 410);
                                     bridgeDiagLog("ACCESS_LOCAL_NETWORK permission requested");
                                 }
                             } catch (RuntimeException ignored) {}
@@ -1558,11 +1558,10 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 // Android 16+ 本地网络保护：按需兜底请求权限（onCreate 弹窗可能被跳过）
                 if (allowed && Build.VERSION.SDK_INT >= 36) {
                     try {
-                        if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+                        if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
                             bridgeDiagLog("xhr blocked by LNP, requesting ACCESS_LOCAL_NETWORK cb=" + callbackId);
-                            requestPermissions(new String[] { Manifest.permission.ACCESS_LOCAL_NETWORK }, 410);
-                            response = bridgeError("local network permission pending");
-                            break;
+                            requestPermissions(new String[] { "android.permission.ACCESS_LOCAL_NETWORK" }, 410);
+                            return bridgeError("local network permission pending");
                         }
                     } catch (RuntimeException ignored) {}
                 }
