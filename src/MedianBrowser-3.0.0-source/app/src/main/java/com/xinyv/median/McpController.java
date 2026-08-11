@@ -162,6 +162,19 @@ public final class McpController {
         if (bound > 0) {
             port = bound;
             if (bound != preferred) prefs.edit().putInt(KEY_PORT, bound).apply();
+            // 自动探测远端 MCP 服务器（MTmcp 等可能后启动）：延迟 3s/6s/6s/6s 重试 4 次。
+            final McpService svc = service;
+            new Thread(new Runnable() {
+                @Override public void run() {
+                    for (int attempt = 1; attempt <= 4; attempt++) {
+                        try {
+                            Thread.sleep(attempt == 1 ? 3000L : 6000L);
+                            if (svc != service) return; // 服务已重启/停止，放弃
+                            if (svc.autoDiscoverRemote()) return; // 探测成功即停止
+                        } catch (Exception ignored) { }
+                    }
+                }
+            }, "mcp-auto-discover").start();
         }
     }
 

@@ -38,6 +38,8 @@ public final class McpService implements MiniHttpServer.Handler {
     private final java.util.Map<String, RemoteToolRef> remoteToolIndex = new java.util.concurrent.ConcurrentHashMap<String, RemoteToolRef>();
     /** 远端 MCP 服务器探测结果缓存（displayName -> 描述）。 */
     private volatile String remoteToolsPayload = "[]";
+    /** 上次远端索引刷新时间（节流用）。 */
+    private volatile long lastRemoteProbe = 0L;
     private static final class RemoteToolRef {
         String display;   // remote.<server>.<tool>
         String server;    // 服务器名（配置中的 name）
@@ -390,12 +392,26 @@ public final class McpService implements MiniHttpServer.Handler {
                 new String[]{"action"})));
         tools.put(tool("mcp_discover", "探测远端 MCP 服务器并缓存其工具列表：name 指定服务器（空=全部已启用）。探测成功后远端工具以 remote.<服务器名>.<工具名> 形式加入可用工具集，DeepSeek 可直接调用", schema(
                 new JSONObject().put("name", prop("string", "服务器名称，空=全部")), null)));
-        refreshRemoteIndex();
+        refreshRemoteIndexIfNeeded();
         for (java.util.Map.Entry<String, RemoteToolRef> e : remoteToolIndex.entrySet()) {
             RemoteToolRef r = e.getValue();
             tools.put(tool(r.display, r.description, schema(null, null)));
         }
         return tools;
+    }
+    /** 启动/工具列表时的远端索引懒刷新：索引为空立即探测（远端服务器可能后启动），非空则 60s 节流刷新。 */
+    private void refreshRemoteIndexIfNeeded() {
+        long now = System.currentTimeMillis();
+        if (remoteToolIndex.isEmpty() || now - lastRemoteProbe > 60000L) {
+            lastRemoteProbe = now;
+            refreshRemoteIndex();
+        }
+    }
+    /** 启动时自动探测远端 MCP 服务器（静默）。返回 true=已注册远端工具，false=探测失败可重试。 */
+    public boolean autoDiscoverRemote() {
+        lastRemoteProbe = System.currentTimeMillis();
+        refreshRemoteIndex();
+        return !remoteToolIndex.isEmpty();
     }
 
     // ==================== 工具分发 ====================
