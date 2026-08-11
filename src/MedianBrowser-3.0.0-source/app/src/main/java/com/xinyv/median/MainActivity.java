@@ -2893,7 +2893,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         panel.addView(toolPanelList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-        lp.maxWidth = dp(360);
+        panel.setMaxWidth(dp(360));
         lp.setMargins(0, dp(70), dp(8), 0);
         rootFrame.addView(panel, lp);
         toolPanelView = panel;
