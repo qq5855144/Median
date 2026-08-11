@@ -38,6 +38,10 @@
             android:name=".AdaptiveDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
             android:name=".OfflineContentProvider"

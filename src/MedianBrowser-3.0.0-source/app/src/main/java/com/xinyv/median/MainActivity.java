@@ -6763,6 +6763,16 @@ public final class MainActivity extends Activity implements McpController.UiBind
             if (!mcpKeepAliveLock.isHeld()) mcpKeepAliveLock.acquire();
         } catch (Exception ignored) {}
     }
+    private void startKeepAliveService() {
+        try {
+            Intent intent = new Intent(this, KeepAliveService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+            else startService(intent);
+        } catch (RuntimeException ignored) {}
+    }
+    private void stopKeepAliveService() {
+        try { stopService(new Intent(this, KeepAliveService.class)); } catch (RuntimeException ignored) {}
+    }
     private void releaseMcpKeepAliveLock() {
         try {
             if (mcpKeepAliveLock != null && mcpKeepAliveLock.isHeld()) mcpKeepAliveLock.release();
@@ -7890,6 +7900,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
         if (mcpKeepAlive) {
             acquireMcpKeepAliveLock();
+            startKeepAliveService();
         } else {
             McpController.get().detach();
         }
@@ -7901,6 +7912,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         super.onResume();
         McpController.get().attach(this);
         releaseMcpKeepAliveLock();
+        stopKeepAliveService();
         activityResumed = true;
         applyUiThreadPriority();
         applyDisplayPolicy();
@@ -8000,6 +8012,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     protected void onDestroy() {
         McpController.get().stop();
         releaseMcpKeepAliveLock();
+        stopKeepAliveService();
         activityResumed = false;
         updateAggressivePerformanceResources();
         aggressivePerformanceController.stop(this);
