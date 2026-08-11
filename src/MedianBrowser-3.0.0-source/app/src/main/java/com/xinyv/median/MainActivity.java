@@ -1540,7 +1540,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
 
     private void startScriptRequest(final WebView source, final String token, final String scriptId,
                                     final String callbackId, final JSONObject args, final String pageUrl) {
-        if (scriptNetworkExecutor == null || scriptNetworkExecutor.isShutdown()) return;
+        if (scriptNetworkExecutor == null || scriptNetworkExecutor.isShutdown()) {
+            try { android.util.Log.d("MedianBridge", "startScriptRequest SKIPPED executor=null|shutdown cb=" + callbackId); } catch (RuntimeException ignored) {}
+            return;
+        }
+        try { android.util.Log.d("MedianBridge", "startScriptRequest dispatch cb=" + callbackId + " url=" + args.optString("u", "") + " page=" + pageUrl); } catch (RuntimeException ignored) {}
         scriptNetworkExecutor.execute(new Runnable() {
             @Override public void run() {
                 HttpURLConnection connection = null;
@@ -1667,20 +1671,27 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 attempts++;
                 if (source == null || scriptStore == null) return;
                 String expected = scriptBridgeTokens.get(source);
-                if (expected == null || !token.equals(expected)) return;
+                if (expected == null || !token.equals(expected)) {
+                    try { android.util.Log.d("MedianBridge", "dispatch guard FAIL expected=" + (expected != null) + " tokenEq=" + token.equals(expected) + " cb=" + callbackId + " event=" + event); } catch (RuntimeException ignored) {}
+                    return;
+                }
                 String current = source.getUrl();
                 boolean urlReady = current != null && scriptStore.matchesUrl(scriptId, current);
                 // 页面导航早期 getUrl() 可能尚未就绪：延迟重试（最多约 3 秒），避免脚本侧 GM 请求永久无响应
                 if (!urlReady && attempts < 12) {
+                    try { android.util.Log.d("MedianBridge", "dispatch retry attempts=" + attempts + " url=" + current + " event=" + event); } catch (RuntimeException ignored) {}
                     uiHandler.postDelayed(this, 250);
                     return;
                 }
-                if (!urlReady) return;
+                if (!urlReady) {
+                    try { android.util.Log.d("MedianBridge", "dispatch GIVEUP attempts=" + attempts + " url=" + current + " event=" + event); } catch (RuntimeException ignored) {}
+                    return;
+                }
                 String objectName = UserScriptStore.dispatchObjectName(token, scriptId);
                 String js = "(function(){var d=window[" + JSONObject.quote(objectName) + "];if(d&&typeof d.dispatch==='function')d.dispatch(" +
                         JSONObject.quote(token) + "," + JSONObject.quote(callbackId) + "," + JSONObject.quote(event) + "," +
                         (payload == null ? "{}" : payload.toString()) + ");})();";
-                try { source.evaluateJavascript(js, null); } catch (RuntimeException ignored) {}
+                try { source.evaluateJavascript(js, null); try { android.util.Log.d("MedianBridge", "dispatch SENT event=" + event + " cb=" + callbackId + " attempts=" + attempts); } catch (RuntimeException ignored) {} } catch (RuntimeException ignored) {}
             }
         });
     }
