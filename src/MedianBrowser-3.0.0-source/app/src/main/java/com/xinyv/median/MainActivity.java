@@ -2809,9 +2809,17 @@ public final class MainActivity extends Activity implements McpController.UiBind
             if ("start".equals(t)) {
                 String argHint = "";
                 if (extra != null) {
-                    if (extra.has("path")) argHint = " " + extra.optString("path");
+                    if (extra.has("path")) {
+                        String p = extra.optString("path");
+                        int idx = p.lastIndexOf('/');
+                        argHint = " " + (idx >= 0 ? p.substring(idx + 1) : p);
+                    }
                     else if (extra.has("pattern")) argHint = " " + extra.optString("pattern");
-                    else if (extra.has("dir")) argHint = " " + extra.optString("dir");
+                    else if (extra.has("dir")) {
+                        String p = extra.optString("dir");
+                        int idx = p.lastIndexOf('/');
+                        argHint = " " + (idx >= 0 ? p.substring(idx + 1) : p);
+                    }
                 }
                 line = "\uD83D\uDD27 " + name + argHint;
             } else if ("done".equals(t)) {
@@ -2871,7 +2879,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         toolPanelBadge.setText("🔧 AI 工具");
         toolPanelBadge.setTextColor(Color.WHITE);
         toolPanelBadge.setTextSize(11.5f);
-        toolPanelBadge.setSingleLine(true);
+        toolPanelBadge.setMaxLines(2);
+        toolPanelBadge.setEllipsize(android.text.TextUtils.TruncateAt.END);
         toolPanelBadge.setPadding(dp(2), dp(4), dp(2), dp(4));
         toolPanelBadge.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleToolPanel(); }
@@ -2883,7 +2892,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         toolPanelList.setVisibility(View.GONE);
         panel.addView(toolPanelList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(230), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.maxWidth = dp(360);
         lp.setMargins(0, dp(70), dp(8), 0);
         rootFrame.addView(panel, lp);
         toolPanelView = panel;
@@ -2925,7 +2935,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
                             row.setText(line);
                             row.setTextColor(Color.WHITE);
                             row.setTextSize(11f);
-                            row.setSingleLine(true);
+                            row.setMaxLines(2);
+                            row.setEllipsize(android.text.TextUtils.TruncateAt.END);
                             row.setPadding(dp(2), dp(3), dp(2), dp(3));
                             row.setOnClickListener(new View.OnClickListener() {
                                 @Override public void onClick(View v) { toolPanelExpanded = false; updateToolPanel(); }
