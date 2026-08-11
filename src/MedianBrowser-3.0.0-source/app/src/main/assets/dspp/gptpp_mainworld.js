@@ -101,8 +101,19 @@
                     } catch (e) { /* ignore */ }
                     finish(arr);
                 }
-                /* 兜底：3 秒后无论如何 resolve */
-                setTimeout(function () { try { console.log('[MedianGPT++] waitToolsReady fallback: cache=' + (__toolsCache ? __toolsCache.length : 0) + ' loading=' + __toolsLoading); } catch (e) { /* ignore */ } finish(__toolsCache || []); }, 3000);
+                /* 兜底：轮询等待 GM 请求完成（最长 8 秒；权限弹窗批准期间请求可能在飞） */
+                var t0 = Date.now();
+                (function poll() {
+                    try {
+                        if (__toolsCache && __toolsCache.length > 0) { finish(__toolsCache); return; }
+                        if (!__toolsLoading || Date.now() - t0 > 8000) {
+                            console.log('[MedianGPT++] waitToolsReady fallback: cache=' + (__toolsCache ? __toolsCache.length : 0) + ' loading=' + __toolsLoading + ' waited=' + (Date.now() - t0));
+                            finish(__toolsCache || []);
+                            return;
+                        }
+                        setTimeout(poll, 500);
+                    } catch (e) { finish(__toolsCache || []); }
+                })();
             } catch (e) { resolve(__toolsCache || []); }
         });
     }
@@ -362,10 +373,10 @@
         var __prefetchAttempts = 0;
         function __prefetchTools() {
             if (__toolsCache && __toolsCache.length > 0) return;
-            if (__prefetchAttempts >= 4) return;
+            if (__prefetchAttempts >= 8) return;
             __prefetchAttempts++;
             try { gmFetchTools(function (arr) { console.log('[MedianGPT++] tools prefetched:', arr ? arr.length : 0); }); } catch (e) { /* ignore */ }
-            setTimeout(__prefetchTools, 2500);
+            setTimeout(__prefetchTools, 3000);
         }
         setTimeout(__prefetchTools, 800);
         /* 将 body（可能为 ReadableStream）读取为字符串；无法读取返回 null */

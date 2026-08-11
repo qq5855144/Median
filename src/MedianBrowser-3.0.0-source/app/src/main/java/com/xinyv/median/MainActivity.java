@@ -382,6 +382,26 @@ public final class MainActivity extends Activity implements McpController.UiBind
             } catch (Exception ignored) {
             }
         }
+        // Android 16+ 本地网络保护：GM 桥（app 进程 HttpURLConnection 连 127.0.0.1:8788）
+        // 必须持有 ACCESS_LOCAL_NETWORK 运行时权限，否则抛 "local network target denied"
+        if (Build.VERSION.SDK_INT >= 36) {
+            try {
+                if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+                    uiHandler.postDelayed(new Runnable() {
+                        @Override public void run() {
+                            try {
+                                if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+                                    requestPermissions(new String[] { Manifest.permission.ACCESS_LOCAL_NETWORK }, 410);
+                                    bridgeDiagLog("ACCESS_LOCAL_NETWORK permission requested");
+                                }
+                            } catch (RuntimeException ignored) {}
+                        }
+                    }, 1200);
+                } else {
+                    bridgeDiagLog("ACCESS_LOCAL_NETWORK already granted");
+                }
+            } catch (RuntimeException ignored) {}
+        }
         services = new BrowserServices(this);
         scriptExecutor = newIdleExecutor(1);
         scriptNetworkExecutor = newIdleExecutor(3);
@@ -1535,6 +1555,17 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 boolean allowed = callbackId.matches("[A-Za-z0-9_-]{1,96}") && isHttpUrl(url) &&
                         scriptStore.canConnect(scriptId, url, currentUrl);
                 bridgeDiagLog("xhr action cb=" + callbackId + " allowed=" + allowed + " url=" + url + " page=" + (currentUrl == null ? "NULL" : currentUrl) + " runnable=" + scriptStore.isRunnable(scriptId) + " match=" + scriptStore.matchesUrl(scriptId, currentUrl) + " tokenOk=" + (token.length() >= 32 && token.equals(expectedToken)));
+                // Android 16+ 本地网络保护：按需兜底请求权限（onCreate 弹窗可能被跳过）
+                if (allowed && Build.VERSION.SDK_INT >= 36) {
+                    try {
+                        if (checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+                            bridgeDiagLog("xhr blocked by LNP, requesting ACCESS_LOCAL_NETWORK cb=" + callbackId);
+                            requestPermissions(new String[] { Manifest.permission.ACCESS_LOCAL_NETWORK }, 410);
+                            response = bridgeError("local network permission pending");
+                            break;
+                        }
+                    } catch (RuntimeException ignored) {}
+                }
                 if (allowed) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
                 response = allowed ? bridgeOk(true) : bridgeError("@connect denied");
             } else if ("xhrAbort".equals(action)) {
@@ -1663,7 +1694,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     dispatchScriptEvent(source, token, scriptId, callbackId, "timeout", errorPayload(timeoutError));
                 } catch (Exception error) {
                     String event = scriptConnections.containsKey(key) ? "error" : "abort";
-                    bridgeDiagLog("HTTP " + event + " cb=" + callbackId + " err=" + error);
+                    String em = String.valueOf(error.getMessage());
+                    if (em.contains("local network")) {
+                        bridgeDiagLog("HTTP LNP_BLOCKED cb=" + callbackId + " err=" + em + " (需要 ACCESS_LOCAL_NETWORK 权限)");
+                        try { android.util.Log.d("MedianBridge", "HTTP LNP_BLOCKED cb=" + callbackId + " err=" + em); } catch (RuntimeException ignored) {}
+                    } else {
+                        bridgeDiagLog("HTTP " + event + " cb=" + callbackId + " err=" + error);
+                    }
                     dispatchScriptEvent(source, token, scriptId, callbackId, event, errorPayload(error));
                 } finally {
                     scriptConnections.remove(key);
@@ -7453,6 +7490,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         boolean granted = grantResults.length > 0;
         for (int result : grantResults) if (result != PackageManager.PERMISSION_GRANTED) granted = false;
+        if (requestCode == 410) {
+            bridgeDiagLog("ACCESS_LOCAL_NETWORK result granted=" + granted + " perms=" + java.util.Arrays.toString(permissions));
+        }
         if (requestCode == WEB_PERMISSION_REQUEST && pendingPermissionRequest != null) {
             if (granted && pendingWebPermissionResources != null && pendingPermissionView == webView &&
                     pendingPermissionOrigin != null && sameSecureOrigin(pendingPermissionOrigin, webView.getUrl()))
