@@ -397,6 +397,8 @@ public final class McpService implements MiniHttpServer.Handler {
             RemoteToolRef r = e.getValue();
             tools.put(tool(r.display, r.description, schema(null, null)));
         }
+        JSONArray gt = GithubTools.toolDefinitions();
+        for (int i = 0; i < gt.length(); i++) tools.put(gt.getJSONObject(i));
         return tools;
     }
     /** 启动/工具列表时的远端索引懒刷新：索引为空立即探测（远端服务器可能后启动），非空则 60s 节流刷新。 */
@@ -503,6 +505,10 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("browser_interactive".equals(name)) return interactive();
             if ("mcp_config".equals(name)) return mcpConfig(args);
             if ("mcp_discover".equals(name)) return mcpDiscover(args);
+            // GitHub 内置工具（Token 在 MCP 面板配置）
+            if (name != null && name.startsWith("github_")) {
+                return GithubTools.call(ctl.context(), name, args);
+            }
             // 远端 MCP 工具转发（remote.<server>.<tool>）
             RemoteToolRef ref = remoteToolIndex.get(name);
             if (ref != null) return forwardRemoteCall(ref, args);

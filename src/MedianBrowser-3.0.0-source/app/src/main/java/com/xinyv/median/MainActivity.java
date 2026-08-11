@@ -2716,7 +2716,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "重启 MCP 服务",
                 "远端 MCP 服务器管理",
                 "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
-                "工作区\n" + wsPath
+                "工作区\n" + wsPath,
+                "GitHub Token 设置\n" + (getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                        .getString("github_token", "").isEmpty() ? "未配置（配置后 AI 可操作 GitHub）" : "已配置（21 个 github_* 工具可用）")
         };
         showActionSheet("MCP 连接信息", subtitle, items, null, new SheetHandler() {
             @Override public void onItem(int which) {
@@ -2766,6 +2768,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     case 11:
                         showWorkspaceDialog();
                         break;
+                    case 12:
+                        showGithubTokenDialog();
+                        break;
                     default: break;
                 }
             }
@@ -2796,7 +2801,30 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 .setNegativeButton("取消", null)
                 .show();
     }
-
+    /** GitHub Token 设置对话框：配置后 AI 可通过 21 个 github_* 内置工具操作 GitHub。 */
+    private void showGithubTokenDialog() {
+        final String current = getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                .getString("github_token", "");
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setHint("ghp_xxx 或 github_pat_xxx");
+        input.setText(current);
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+                .setTitle("GitHub Token 设置")
+                .setMessage("配置后 AI 可直接调用 github_get_me / github_create_issue / github_merge_pull_request 等 21 个工具操作 GitHub。\n创建地址：github.com/settings/tokens（勾选 repo 权限）\n留空保存 = 清除 Token")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        String t = input.getText().toString().trim();
+                        getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                                .edit().putString("github_token", t).apply();
+                        toast(t.isEmpty() ? "GitHub Token 已清除" : "GitHub Token 已保存");
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
     /** 处理注入块上报的 [MDEVT] 工具事件（JSON: {t:start|done|flow_done, n:工具名, e:附加}）。 */
     private void handleToolEvent(String jsonStr) {
         try {
