@@ -2691,6 +2691,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         String tokenShown = token == null ? "（未生成）"
                 : (token.length() > 12 ? token.substring(0, 12) + "…" : token);
         String subtitle = enabled ? "点击连接信息自动复制" : "MCP 服务未开启";
+        final String wsPath = getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                .getString("workspace_dir", "/sdcard/Download/Median/Workspace");
         String[] items = new String[] {
                 "本机地址（稳定）\n" + localUrl,
                 "局域网地址\n" + lanUrl + (lan ? "" : "（未开启）"),
@@ -2702,7 +2704,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 "查看状态与统计",
                 "重启 MCP 服务",
                 "远端 MCP 服务器管理",
-                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭")
+                "DeepSeek++ 模式：" + (DeepSeekPP.isEnabled(this) ? "已开启" : "已关闭"),
+                "工作区\n" + wsPath
         };
         showActionSheet("MCP 连接信息", subtitle, items, null, new SheetHandler() {
             @Override public void onItem(int which) {
@@ -2749,10 +2752,38 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     case 10:
                         toggleDeepSeekPP();
                         break;
+                    case 11:
+                        showWorkspaceDialog();
+                        break;
                     default: break;
                 }
             }
         });
+    }
+
+    /** 工作区设置对话框：输入目录路径（支持自动创建）。 */
+    private void showWorkspaceDialog() {
+        final String current = getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                .getString("workspace_dir", "/sdcard/Download/Median/Workspace");
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setText(current);
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+                .setTitle("设置工作区目录")
+                .setMessage("AI 生成的内容可通过 fs_write_file 保存到工作区（相对路径默认基于此目录）。\n支持输入绝对路径，目录不存在将自动创建。")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        String path = input.getText().toString().trim();
+                        if (path.isEmpty()) { toast("路径不能为空"); return; }
+                        getSharedPreferences("median_mcp_v1", MODE_PRIVATE)
+                                .edit().putString("workspace_dir", path).apply();
+                        toast("工作区已设置：" + path);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 远端 MCP 服务器管理：列表 + 添加 + 单服务器操作。 */

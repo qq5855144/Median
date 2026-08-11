@@ -264,6 +264,34 @@ public final class McpService implements MiniHttpServer.Handler {
                 new JSONObject().put("dir", prop("string", "搜索目录，默认 /sdcard/Download"))
                         .put("pattern", prop("string", "文件名模式，如 *.apk 或 Median*")),
                 new String[]{"pattern"})));
+        tools.put(tool("fs_write_file", "写入文件（文本或 base64；相对路径=工作区内，/开头=绝对路径）供 AI 输出内容到本机", schema(
+                new JSONObject().put("path", prop("string", "文件路径：相对路径在工作区内，/开头为绝对路径"))
+                        .put("content", prop("string", "文件内容（文本）或 base64（binary=true）"))
+                        .put("binary", prop("boolean", "true 表示 content 为 base64，默认 false")),
+                new String[]{"path", "content"})));
+        tools.put(tool("fs_append_file", "追加内容到文件末尾（不存在则自动创建）", schema(
+                new JSONObject().put("path", prop("string", "文件路径：相对=工作区内，/开头=绝对"))
+                        .put("content", prop("string", "要追加的内容")),
+                new String[]{"path", "content"})));
+        tools.put(tool("fs_create_dir", "创建目录（自动创建父目录）", schema(
+                new JSONObject().put("path", prop("string", "目录路径：相对=工作区内，/开头=绝对")),
+                new String[]{"path"})));
+        tools.put(tool("fs_delete", "删除文件或目录（目录递归删除）", schema(
+                new JSONObject().put("path", prop("string", "文件/目录路径")),
+                new String[]{"path"})));
+        tools.put(tool("fs_copy", "复制文件或目录（递归）", schema(
+                new JSONObject().put("src", prop("string", "源路径")).put("dst", prop("string", "目标路径")),
+                new String[]{"src", "dst"})));
+        tools.put(tool("fs_move", "移动/重命名文件或目录", schema(
+                new JSONObject().put("src", prop("string", "源路径")).put("dst", prop("string", "目标路径")),
+                new String[]{"src", "dst"})));
+        tools.put(tool("fs_info", "文件/目录详细信息（类型、大小、修改时间、父目录、存在性）", schema(
+                new JSONObject().put("path", prop("string", "路径")),
+                new String[]{"path"})));
+        tools.put(tool("workspace_info", "查看当前工作区（路径、是否存在、可写、磁盘空间）", schema(null, null)));
+        tools.put(tool("workspace_set", "设置工作区目录（自动创建；AI 文件读写默认基于工作区）", schema(
+                new JSONObject().put("path", prop("string", "工作区目录路径，如 /sdcard/Download/Median/Workspace")),
+                new String[]{"path"})));
         tools.put(tool("browser_dom", "提取当前页面结构化内容（标题、URL、正文文本、链接、可交互元素）", schema(null, null)));
         tools.put(tool("browser_interactive", "获取页面全部可交互元素（链接/按钮/输入框/下拉框，含唯一 selector 与屏幕坐标，可直接用于 browser_click / browser_type）", schema(null, null)));
         tools.put(tool("browser_text", "提取当前页面可见文本", schema(null, null)));
@@ -404,6 +432,15 @@ public final class McpService implements MiniHttpServer.Handler {
             if ("fs_list_dir".equals(name)) return fsListDir(args);
             if ("fs_read_file".equals(name)) return fsReadFile(args);
             if ("fs_find_file".equals(name)) return fsFindFile(args);
+            if ("fs_write_file".equals(name)) return fsWriteFile(args);
+            if ("fs_append_file".equals(name)) return fsAppendFile(args);
+            if ("fs_create_dir".equals(name)) return fsCreateDir(args);
+            if ("fs_delete".equals(name)) return fsDelete(args);
+            if ("fs_copy".equals(name)) return fsCopyMove(args, false);
+            if ("fs_move".equals(name)) return fsCopyMove(args, true);
+            if ("fs_info".equals(name)) return fsInfo(args);
+            if ("workspace_info".equals(name)) return workspaceInfo(args);
+            if ("workspace_set".equals(name)) return workspaceSet(args);
             if ("browser_dom".equals(name)) return dom();
             if ("browser_text".equals(name)) return text();
             if ("browser_links".equals(name)) return links();
@@ -898,6 +935,160 @@ public final class McpService implements MiniHttpServer.Handler {
         }
         return new JSONObject().put("result", new JSONObject()
                 .put("ok", true).put("dir", dirPath).put("pattern", pattern).put("matches", matches));
+    }
+
+
+    // ==================== 工作区 + 文件读写（DeepSeek++ 文件桥扩展） ====================
+    private String workspaceDir() {
+        android.content.Context ctx = ctl.context();
+        if (ctx == null) return "/sdcard/Download/Median/Workspace";
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences("median_mcp_v1", android.content.Context.MODE_PRIVATE);
+        return prefs.getString("workspace_dir", "/sdcard/Download/Median/Workspace");
+    }
+    private String resolvePath(String p) {
+        if (p == null || p.isEmpty()) return null;
+        if (p.startsWith("/")) return p;
+        return workspaceDir() + "/" + p;
+    }
+    private JSONObject storageErr() {
+        return new JSONObject().put("result", new JSONObject()
+                .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
+    }
+    private JSONObject workspaceInfo(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String ws = workspaceDir();
+        java.io.File d = new java.io.File(ws);
+        JSONObject o = new JSONObject().put("ok", true).put("workspace", ws)
+                .put("exists", d.exists()).put("writable", d.isDirectory() && d.canWrite());
+        if (d.exists()) {
+            o.put("isDir", d.isDirectory());
+            o.put("freeBytes", d.getFreeSpace());
+            o.put("totalBytes", d.getTotalSpace());
+        }
+        return new JSONObject().put("result", o);
+    }
+    private JSONObject workspaceSet(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String p = args.optString("path", "");
+        if (p.isEmpty()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        java.io.File d = new java.io.File(p);
+        if (!d.exists() && !d.mkdirs()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "无法创建目录: " + p));
+        if (!d.isDirectory()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "不是目录: " + p));
+        if (!d.canWrite()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "目录不可写: " + p));
+        android.content.Context ctx = ctl.context();
+        if (ctx != null) {
+            ctx.getSharedPreferences("median_mcp_v1", android.content.Context.MODE_PRIVATE)
+                    .edit().putString("workspace_dir", p).apply();
+        }
+        return new JSONObject().put("result", new JSONObject().put("ok", true).put("workspace", p));
+    }
+    private JSONObject fsWriteFile(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String path = resolvePath(args.optString("path", ""));
+        if (path == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        String content = args.optString("content", "");
+        boolean binary = args.optBoolean("binary", false);
+        byte[] data;
+        try {
+            if (binary) data = android.util.Base64.decode(content, android.util.Base64.DEFAULT);
+            else data = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "base64 解码失败"));
+        }
+        if (data.length > 64L * 1024 * 1024) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "内容过大 (>64MB)"));
+        java.io.File f = new java.io.File(path);
+        java.io.File parent = f.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "无法创建父目录: " + parent.getAbsolutePath()));
+        java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+        try { out.write(data); } finally { out.close(); }
+        return new JSONObject().put("result", new JSONObject().put("ok", true).put("path", path).put("size", data.length).put("mode", binary ? "base64" : "utf-8"));
+    }
+    private JSONObject fsAppendFile(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String path = resolvePath(args.optString("path", ""));
+        if (path == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        String content = args.optString("content", "");
+        byte[] data = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (data.length > 64L * 1024 * 1024) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "内容过大 (>64MB)"));
+        java.io.File f = new java.io.File(path);
+        java.io.File parent = f.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "无法创建父目录"));
+        java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
+        try { out.write(data); } finally { out.close(); }
+        return new JSONObject().put("result", new JSONObject().put("ok", true).put("path", path).put("size", f.length()));
+    }
+    private JSONObject fsCreateDir(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String path = resolvePath(args.optString("path", ""));
+        if (path == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        java.io.File d = new java.io.File(path);
+        if (d.exists()) return new JSONObject().put("result", new JSONObject().put("ok", true).put("path", path).put("existed", true));
+        if (!d.mkdirs()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "创建失败: " + path));
+        return new JSONObject().put("result", new JSONObject().put("ok", true).put("path", path).put("existed", false));
+    }
+    private JSONObject fsDelete(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String path = resolvePath(args.optString("path", ""));
+        if (path == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        java.io.File f = new java.io.File(path);
+        if (!f.exists()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "不存在: " + path));
+        boolean ok = deleteRecursive(f);
+        return new JSONObject().put("result", new JSONObject().put("ok", ok).put("path", path).put("deleted", ok));
+    }
+    private boolean deleteRecursive(java.io.File f) {
+        if (f.isDirectory()) {
+            java.io.File[] kids = f.listFiles();
+            if (kids != null) for (java.io.File k : kids) deleteRecursive(k);
+        }
+        return f.delete();
+    }
+    private JSONObject fsCopyMove(JSONObject args, boolean move) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String src = resolvePath(args.optString("src", ""));
+        String dst = resolvePath(args.optString("dst", ""));
+        if (src == null || dst == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "src/dst 必填"));
+        java.io.File s = new java.io.File(src), d = new java.io.File(dst);
+        if (!s.exists()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "源不存在: " + src));
+        if (s.getAbsolutePath().equals(d.getAbsolutePath())) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "源与目标相同"));
+        if (move) {
+            if (d.exists()) deleteRecursive(d);
+            boolean ok = s.renameTo(d);
+            if (!ok) { copyRecursive(s, d); ok = d.exists(); deleteRecursive(s); }
+            return new JSONObject().put("result", new JSONObject().put("ok", ok).put("op", "move").put("src", src).put("dst", dst));
+        }
+        if (d.exists()) deleteRecursive(d);
+        boolean ok = copyRecursive(s, d);
+        return new JSONObject().put("result", new JSONObject().put("ok", ok).put("op", "copy").put("src", src).put("dst", dst));
+    }
+    private boolean copyRecursive(java.io.File src, java.io.File dst) {
+        try {
+            if (src.isDirectory()) {
+                if (!dst.exists() && !dst.mkdirs()) return false;
+                java.io.File[] kids = src.listFiles();
+                if (kids != null) for (java.io.File k : kids) if (!copyRecursive(k, new java.io.File(dst, k.getName()))) return false;
+                return true;
+            }
+            java.io.File parent = dst.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) return false;
+            java.io.FileInputStream in = new java.io.FileInputStream(src);
+            java.io.FileOutputStream out = new java.io.FileOutputStream(dst);
+            try {
+                byte[] buf = new byte[65536];
+                int r;
+                while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
+            } finally { in.close(); out.close(); }
+            return true;
+        } catch (Exception e) { return false; }
+    }
+    private JSONObject fsInfo(JSONObject args) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return storageErr();
+        String path = resolvePath(args.optString("path", ""));
+        if (path == null) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "path 必填"));
+        java.io.File f = new java.io.File(path);
+        if (!f.exists()) return new JSONObject().put("result", new JSONObject().put("ok", false).put("error", "不存在: " + path));
+        return new JSONObject().put("result", new JSONObject().put("ok", true)
+                .put("path", path).put("isDir", f.isDirectory()).put("size", f.length())
+                .put("modified", f.lastModified()).put("parent", f.getParent()));
     }
 
     // ==================== DOM / 文本 / 链接 / 源码 ====================
