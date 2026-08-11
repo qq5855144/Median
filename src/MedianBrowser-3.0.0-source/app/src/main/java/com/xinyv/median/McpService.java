@@ -525,7 +525,9 @@ public final class McpService implements MiniHttpServer.Handler {
         String action = args.optString("action", "list");
         String name = args.optString("name", "");
         if ("add".equals(action)) {
-            return ctl.remoteMcpAdd(ctx, name, args.optString("url", ""), args.optString("token", ""));
+            JSONObject r = ctl.remoteMcpAdd(ctx, name, args.optString("url", ""), args.optString("token", ""));
+            if (r.has("ok")) refreshRemoteIndex(); // 新增后立即探测并注册其工具（无需手动 discover）
+            return r;
         }
         if ("remove".equals(action)) {
             if (name.isEmpty()) return error("name required");
