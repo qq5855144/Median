@@ -154,6 +154,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private static final int BLUE = Color.rgb(26, 115, 232);
 
     private FrameLayout rootFrame;
+    // ===== P0: AI 工具调用可视化面板 + 长任务通知 =====
+    private View toolPanelView;
+    private LinearLayout toolPanelList;
+    private TextView toolPanelBadge;
+    private boolean toolPanelExpanded;
+    private final java.util.ArrayDeque<String> toolEvents = new java.util.ArrayDeque<String>();
+    private int toolNotifyId = 4001;
     private LinearLayout browserChrome;
     private LinearLayout topBar;
     private LinearLayout bottomBar;
@@ -1142,6 +1149,10 @@ public final class MainActivity extends Activity implements McpController.UiBind
             public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
                 if (message != null) {
                     try {
+                        String raw = message.message();
+                        if (raw != null && raw.startsWith("[MDEVT]")) {
+                            handleToolEvent(raw.substring(7));
+                        }
                         JSONObject entry = new JSONObject();
                         android.webkit.ConsoleMessage.MessageLevel level = message.messageLevel();
                         entry.put("type", level == android.webkit.ConsoleMessage.MessageLevel.ERROR ? "error"
@@ -2784,6 +2795,150 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    /** 处理注入块上报的 [MDEVT] 工具事件（JSON: {t:start|done|flow_done, n:工具名, e:附加}）。 */
+    private void handleToolEvent(String jsonStr) {
+        try {
+            if (jsonStr == null || jsonStr.isEmpty()) return;
+            JSONObject evt = new JSONObject(jsonStr);
+            String t = evt.optString("t", "");
+            String name = evt.optString("n", "");
+            JSONObject extra = evt.optJSONObject("e");
+            String line;
+            if ("start".equals(t)) {
+                String argHint = "";
+                if (extra != null) {
+                    if (extra.has("path")) argHint = " " + extra.optString("path");
+                    else if (extra.has("pattern")) argHint = " " + extra.optString("pattern");
+                    else if (extra.has("dir")) argHint = " " + extra.optString("dir");
+                }
+                line = "\uD83D\uDD27 " + name + argHint;
+            } else if ("done".equals(t)) {
+                boolean ok = extra != null && extra.optBoolean("ok", false);
+                long ms = extra != null ? extra.optLong("ms", 0) : 0;
+                String dur = ms >= 1000 ? String.format(java.util.Locale.US, "%.1fs", ms / 1000.0) : (ms + "ms");
+                line = (ok ? "\u2705 " : "\u274C ") + name + " (" + dur + ")";
+                if (!activityResumed && ms >= 5000) {
+                    notifyLongTask("工具执行完成", (ok ? "✅ " : "❌ ") + name + " 耗时 " + dur);
+                }
+            } else {
+                line = "🤖 AI 回复完成";
+                if (!activityResumed) notifyLongTask("AI 已完成回复", "回答已生成，返回 Median 查看");
+            }
+            toolEvents.addLast(line);
+            while (toolEvents.size() > 20) toolEvents.removeFirst();
+            updateToolPanel();
+        } catch (Exception ignored) {}
+    }
+
+    /** 长任务完成通知（仅应用在后台时）。 */
+    private void notifyLongTask(String title, String text) {
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                android.app.NotificationChannel ch = new android.app.NotificationChannel(
+                        "median_tasks", "AI 任务", android.app.NotificationManager.IMPORTANCE_DEFAULT);
+                ch.setShowBadge(true);
+                nm.createNotificationChannel(ch);
+            }
+            Intent intent = new Intent(this, MainActivity.class);
+            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(this, 0, intent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+            android.app.Notification.Builder b = android.os.Build.VERSION.SDK_INT >= 26
+                    ? new android.app.Notification.Builder(this, "median_tasks")
+                    : new android.app.Notification.Builder(this);
+            b.setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .setWhen(System.currentTimeMillis());
+            nm.notify(toolNotifyId++, b.build());
+        } catch (RuntimeException ignored) {}
+    }
+
+    /** 构建右上角工具面板（懒加载）。 */
+    private void buildToolPanel() {
+        if (toolPanelView != null) return;
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackground(roundedBg(0xCC222222, dp(10)));
+        panel.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        toolPanelBadge = new TextView(this);
+        toolPanelBadge.setText("🔧 AI 工具");
+        toolPanelBadge.setTextColor(Color.WHITE);
+        toolPanelBadge.setTextSize(11.5f);
+        toolPanelBadge.setSingleLine(true);
+        toolPanelBadge.setPadding(dp(2), dp(4), dp(2), dp(4));
+        toolPanelBadge.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { toggleToolPanel(); }
+        });
+        panel.addView(toolPanelBadge, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        toolPanelList = new LinearLayout(this);
+        toolPanelList.setOrientation(LinearLayout.VERTICAL);
+        toolPanelList.setVisibility(View.GONE);
+        panel.addView(toolPanelList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(230), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.setMargins(0, dp(70), dp(8), 0);
+        rootFrame.addView(panel, lp);
+        toolPanelView = panel;
+        toolPanelView.setVisibility(View.GONE);
+    }
+
+    private android.graphics.drawable.Drawable roundedBg(int color, int radius) {
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setColor(color);
+        gd.setCornerRadius(radius);
+        return gd;
+    }
+
+    private void toggleToolPanel() {
+        toolPanelExpanded = !toolPanelExpanded;
+        updateToolPanel();
+    }
+
+    /** 更新面板：badge 显示最新一条，展开显示最近 8 条。 */
+    private void updateToolPanel() {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (toolPanelView == null) buildToolPanel();
+                    if (toolEvents.isEmpty()) {
+                        toolPanelView.setVisibility(View.GONE);
+                        return;
+                    }
+                    toolPanelView.setVisibility(View.VISIBLE);
+                    String latest = toolEvents.getLast();
+                    toolPanelBadge.setText(toolPanelExpanded ? "🔧 AI 工具调用（点击收起）" : latest);
+                    toolPanelList.removeAllViews();
+                    if (toolPanelExpanded) {
+                        int start = Math.max(0, toolEvents.size() - 8);
+                        int idx = 0;
+                        for (String line : toolEvents) {
+                            if (idx++ < start) continue;
+                            TextView row = new TextView(MainActivity.this);
+                            row.setText(line);
+                            row.setTextColor(Color.WHITE);
+                            row.setTextSize(11f);
+                            row.setSingleLine(true);
+                            row.setPadding(dp(2), dp(3), dp(2), dp(3));
+                            row.setOnClickListener(new View.OnClickListener() {
+                                @Override public void onClick(View v) { toolPanelExpanded = false; updateToolPanel(); }
+                            });
+                            toolPanelList.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                        }
+                        toolPanelList.setVisibility(View.VISIBLE);
+                    } else {
+                        toolPanelList.setVisibility(View.GONE);
+                    }
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     /** 远端 MCP 服务器管理：列表 + 添加 + 单服务器操作。 */
