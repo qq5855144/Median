@@ -1556,17 +1556,18 @@ public final class MainActivity extends Activity implements McpController.UiBind
                         scriptStore.canConnect(scriptId, url, currentUrl);
                 bridgeDiagLog("xhr action cb=" + callbackId + " allowed=" + allowed + " url=" + url + " page=" + (currentUrl == null ? "NULL" : currentUrl) + " runnable=" + scriptStore.isRunnable(scriptId) + " match=" + scriptStore.matchesUrl(scriptId, currentUrl) + " tokenOk=" + (token.length() >= 32 && token.equals(expectedToken)));
                 // Android 16+ 本地网络保护：按需兜底请求权限（onCreate 弹窗可能被跳过）
+                boolean lnpBlocked = false;
                 if (allowed && Build.VERSION.SDK_INT >= 36) {
                     try {
                         if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
                             bridgeDiagLog("xhr blocked by LNP, requesting ACCESS_LOCAL_NETWORK cb=" + callbackId);
                             requestPermissions(new String[] { "android.permission.ACCESS_LOCAL_NETWORK" }, 410);
-                            return bridgeError("local network permission pending");
+                            lnpBlocked = true;
                         }
                     } catch (RuntimeException ignored) {}
                 }
-                if (allowed) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
-                response = allowed ? bridgeOk(true) : bridgeError("@connect denied");
+                if (allowed && !lnpBlocked) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
+                response = (allowed && !lnpBlocked) ? bridgeOk(true) : bridgeError(lnpBlocked ? "local network permission pending" : "@connect denied");
             } else if ("xhrAbort".equals(action)) {
                 HttpURLConnection connection = scriptConnections.remove(token + "|" + args.optString("i", ""));
                 if (connection != null) connection.disconnect();
