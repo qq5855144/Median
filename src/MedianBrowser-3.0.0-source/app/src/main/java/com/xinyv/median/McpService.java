@@ -872,7 +872,7 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject fsListDir(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String path = args.optString("path", "/sdcard/Download");
+        String path = resolvePath(args.optString("path", "/sdcard/Download"));
         java.io.File dir = new java.io.File(path);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "目录不存在: " + path));
@@ -901,7 +901,7 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject fsReadFile(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String path = args.optString("path", "");
+        String path = resolvePath(args.optString("path", ""));
         int maxBytes = args.optInt("maxBytes", 1048576);
         boolean binary = args.optBoolean("binary", false);
         java.io.File f = new java.io.File(path);
@@ -937,7 +937,7 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject fsFindFile(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String dirPath = args.optString("dir", "/sdcard/Download");
+        String dirPath = resolvePath(args.optString("dir", "/sdcard/Download"));
         String pattern = args.optString("pattern", "*.apk");
         java.io.File dir = new java.io.File(dirPath);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()

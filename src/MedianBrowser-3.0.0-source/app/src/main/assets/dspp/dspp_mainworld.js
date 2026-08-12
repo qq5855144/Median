@@ -598,3 +598,242 @@ try{mo.observe(document.body,{childList:true,subtree:true,characterData:true});}
 clean();
 window.__medianHideMo=mo;
 })();
+/* ============================================================
+ * Median DeepSeek++ 体验增强模块 (方向①)
+ * 追加层：不修改上方压缩代码，覆盖/包装既有机制
+ * 1) 输入框适配：execCommand('insertText') + 可见文本 + VERIFIED 验证
+ * 2) 路径预执行：用户消息含绝对路径 → 自动 fs_list_dir/fs_read_file → 注入本轮
+ * 3) 轮次上限：最多 6 轮自动继续（含首次）
+ * ============================================================ */
+;(function(){
+if (window.__dsppPlusInstalled) return;
+window.__dsppPlusInstalled = true;
+var _log = function(m){ try{ console.log('[MedianDSPP+]', m); }catch(e){} };
+
+/* ---------- 1. 输入框适配：覆盖 __autoContinue ---------- */
+/* ChatGPT++ r119-r120 验证结论：
+   - React 应用必须 execCommand('insertText') 产生真实 input 事件
+   - 隐藏 textarea 不可信，优先 contenteditable/[role=textbox]
+   - 发送后用输入框是否被清空验证（VERIFIED） */
+var _origAutoContinue = window.__autoContinue;
+window.__autoContinue = function(){
+  try {
+    var at = [120, 300, 700];
+    var round = (window.__medianRound = (window.__medianRound || 0) + 1);
+    if (round > 6) { _log('round limit reached (' + round + '), stop'); return; }
+    _log('autoContinue round=' + round);
+    function findInput(){
+      var sels = ['div[contenteditable="true"]', '[role="textbox"]', 'textarea', 'input[type="text"]'];
+      for (var i = 0; i < sels.length; i++) {
+        var el = document.querySelector(sels[i]);
+        if (el && el.offsetParent !== null) return el;
+      }
+      for (var i = 0; i < sels.length; i++) {
+        var el = document.querySelector(sels[i]);
+        if (el) return el;
+      }
+      return null;
+    }
+    function sendOne(i){
+      try {
+        var ta = findInput();
+        if (!ta) { window.__acLog = 'NO-INPUT:' + i; _log('no input found'); return; }
+        var txt = window.__dsppPlusContinueText || 'Continue';
+        var isCE = ta.isContentEditable || ta.getAttribute && ta.getAttribute('contenteditable') === 'true';
+        try { ta.focus(); } catch(e){}
+        if (isCE) {
+          /* contenteditable: execCommand('insertText') 产生真实 input 事件 */
+          var sel = window.getSelection();
+          try { sel.selectAllChildren(ta); sel.collapseToEnd(); } catch(e){}
+          var ok = false;
+          try { ok = document.execCommand('insertText', false, txt); } catch(e){ ok = false; }
+          if (!ok) { ta.textContent = txt; }
+        } else {
+          /* textarea/input: native setter + input 事件 */
+          var proto = ta.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+          var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+          setter.call(ta, txt);
+          ta.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+        window.__acLog = 'INJECTED:' + i;
+        _log('text injected (' + txt.length + ' chars) via ' + (isCE ? 'execCommand' : 'nativeSetter'));
+        setTimeout(function(){
+          try {
+            /* 找发送按钮：primary 类 / data-testid send / aria-label */
+            var btn = null;
+            var cands = document.querySelectorAll('button, [role="button"]');
+            for (var k = 0; k < cands.length; k++) {
+              var b = cands[k];
+              var cl = String(b.className || '') + ' ' + String(b.getAttribute && b.getAttribute('data-testid') || '') + ' ' + String(b.getAttribute && b.getAttribute('aria-label') || '');
+              if (/send|primary|submit|发送/i.test(cl)) { btn = b; break; }
+            }
+            if (!btn) { /* 回退：向上找 primary 按钮（原逻辑） */
+              var pp = ta, dd = 0;
+              while (pp && dd < 6 && !btn) {
+                pp = pp.parentElement; if (!pp) break;
+                var bs = pp.querySelectorAll('[role="button"]');
+                for (var m = 0; m < bs.length; m++) {
+                  if (String(bs[m].className || '').indexOf('primary') > -1) { btn = bs[m]; break; }
+                }
+                dd++;
+              }
+            }
+            if (btn) {
+              var bk = Object.keys(btn).filter(function(x){ return x.indexOf('__reactProps') === 0; })[0];
+              if (bk && btn[bk] && btn[bk].onClick) {
+                try {
+                  btn[bk].onClick({type:'click', target:btn, currentTarget:btn, bubbles:true, cancelable:true,
+                    preventDefault:function(){}, stopPropagation:function(){}, persist:function(){},
+                    isDefaultPrevented:function(){return false;}, isPropagationStopped:function(){return false;},
+                    nativeEvent:{isTrusted:true}, button:0});
+                  window.__acLog = 'CLICKED send:' + i;
+                  _log('CLICKED send #' + round);
+                  /* VERIFIED：1.2s 后检查输入框是否被清空 */
+                  setTimeout(function(){
+                    try {
+                      var ta2 = findInput();
+                      var val = ta2 ? (ta2.value || ta2.textContent || '') : '';
+                      if (String(val).replace(/[\s\u200b]/g, '').length === 0) {
+                        window.__acLog = 'VERIFIED send (input cleared)';
+                        _log('VERIFIED send #' + round + ' (input cleared)');
+                      } else {
+                        window.__acLog = 'UNVERIFIED send (input not cleared): ' + JSON.stringify(String(val).slice(0, 40));
+                        _log('UNVERIFIED send #' + round + ' input=' + JSON.stringify(String(val).slice(0, 40)));
+                      }
+                    } catch(e){}
+                  }, 1200);
+                  return;
+                } catch(e3) { _log('reactProps click err: ' + (e3 && e3.message || e3)); }
+              }
+            }
+            /* 回退：Enter 键 */
+            var pk = Object.keys(ta).filter(function(x){ return x.indexOf('__reactProps') === 0; })[0];
+            var rp = ta[pk];
+            if (rp && rp.onKeyDown) {
+              try {
+                rp.onKeyDown({key:'Enter', code:'Enter', keyCode:13, which:13, shiftKey:false, ctrlKey:false, altKey:false, metaKey:false, repeat:false, isComposing:false, type:'keydown', bubbles:true, cancelable:true, defaultPrevented:false,
+                  preventDefault:function(){}, stopPropagation:function(){}, persist:function(){},
+                  isDefaultPrevented:function(){return false;}, isPropagationStopped:function(){return false;},
+                  nativeEvent:{isTrusted:true, key:'Enter', keyCode:13, which:13}});
+                window.__acLog = 'ENTER:' + i;
+                _log('ENTER sent #' + round);
+                return;
+              } catch(e4) { _log('keydown err: ' + (e4 && e4.message || e4)); }
+            }
+            /* 最后回退：真实 Enter 键盘事件 */
+            try {
+              ta.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true}));
+              ta.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true}));
+              window.__acLog = 'NATIVE-ENTER:' + i;
+              _log('NATIVE-ENTER sent #' + round);
+            } catch(e5) { _log('native enter err: ' + (e5 && e5.message || e5)); }
+          } catch(e2){ _log('send err: ' + (e2 && e2.message || e2)); }
+        }, i === 0 ? 150 : 400);
+      } catch(e){ _log('sendOne err: ' + (e && e.message || e)); }
+    }
+    for (var i = 0; i < at.length; i++) { setTimeout(function(idx){ sendOne(idx); }, at[idx]); }
+  } catch(e){ _log('autoContinue err: ' + (e && e.message || e)); }
+};
+_log('__autoContinue patched (execCommand + VERIFIED + round limit)');
+
+/* ---------- 2. 路径预执行：外层 fetch 包装 ---------- */
+/* 用户消息（非工具继续）含绝对路径 → 预执行 fs_list_dir / fs_read_file
+   结果以 [System: 预执行结果] 注入本轮 prompt，AI 第一轮即可分析 */
+var _baseFetch = window.fetch;
+if (_baseFetch) {
+  window.fetch = function(url, opts) {
+    var u = String(url);
+    if (u.indexOf('/api/v0/chat/completion') > -1 && opts && opts.method === 'POST') {
+      try {
+        var req = JSON.parse(opts.body || '{}');
+        var p = req.prompt;
+        if (p && typeof p === 'string' && p.indexOf('[System: 工具执行结果]') === -1 && p.indexOf('[System: 预执行结果]') === -1) {
+          var pre = window.__dsppPreExecute(p);
+          if (pre) {
+            req.prompt = '[System: 预执行结果]\n' + pre + '\n[结果结束。基于以上信息回答用户。]\n' + p;
+            opts = Object.assign({}, opts, { body: JSON.stringify(req) });
+            window.__dsppPreLog = 'PRE-EXECUTED';
+            _log('path pre-execution injected (' + pre.length + ' chars)');
+          }
+        }
+      } catch(e) { _log('pre-exec parse err: ' + (e && e.message || e)); }
+    }
+    return _baseFetch.apply(this, arguments);
+  };
+  _log('fetch wrapper installed (path pre-execution)');
+}
+/* 提取绝对路径并预执行（同步 XHR 到 MCP；__runMedianTool 是异步的，这里需同步结果） */
+window.__dsppSyncTool = function(name, args){
+  try {
+    var x = new XMLHttpRequest();
+    x.open('POST', 'http://127.0.0.1:8788/mcp', false); /* 同步 */
+    x.setRequestHeader('Content-Type', 'application/json');
+    x.timeout = 8000;
+    x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: name, arguments: args || {} } }));
+    var res = JSON.parse(x.responseText || '{}');
+    var c = res && res.result && res.result.content && res.result.content[0] && res.result.content[0].text;
+    var data = c ? JSON.parse(c) : {};
+    return data.result !== undefined ? data.result : data;
+  } catch(e) { return { ok: false, error: String(e && e.message || e) }; }
+};
+window.__dsppPreExecute = function(prompt){
+  try {
+    var paths = [];
+    var re = /(?:[^\s"'`，。；：,;:]+)?(\/(?:sdcard|storage|data|mnt|system|Download|MT2)[^\s"'`，。；：,;:]*)/g;
+    var m;
+    while ((m = re.exec(prompt)) !== null) {
+      var p = m[1].replace(/[.。、,，;；:：]+$/, '');
+      if (p.length > 4 && p.length < 300 && paths.indexOf(p) === -1) paths.push(p);
+    }
+    if (paths.length === 0) return null;
+    var parts = [];
+    for (var i = 0; i < paths.length && i < 3; i++) {
+      var p = paths[i];
+      /* 目录 → fs_list_dir；否则尝试 fs_read_file（文本） */
+      var isDir = /\/$/.test(p) || /(Download|MT2|mcp|docs|files|data|sdcard|storage)\/[^\/]*$/.test(p);
+      var name = 'fs_list_dir', args = { path: p };
+      if (!isDir && /\.(apk|txt|md|json|xml|js|java|html|css|log|py|sh)$/i.test(p)) {
+        name = 'fs_read_file'; args = { path: p, maxBytes: 200000 };
+      }
+      var r = window.__dsppSyncTool(name, args);
+      if (r && r.ok !== false) {
+        parts.push('[' + p + ']\n' + JSON.stringify(r).slice(0, 4000));
+      } else {
+        parts.push('[' + p + '] 读取失败: ' + JSON.stringify(r).slice(0, 200));
+      }
+    }
+    return parts.join('\n');
+  } catch(e) { return null; }
+};
+_log('__dsppPreExecute ready');
+
+/* ---------- 3. 轮次上限保护：包装 __medianToolAndContinue ---------- */
+var _origToolAndContinue = window.__medianToolAndContinue;
+window.__medianToolAndContinue = function(nm, args){
+  var round = (window.__medianRound = (window.__medianRound || 0) + 1);
+  if (round > 6) { _log('tool round limit (' + round + '), skip ' + nm); window.__pendingToolResult = null; return; }
+  if (nm === 'fs_list_dir' || nm === 'fs_read_file' || nm === 'fs_find_file') {
+    /* 预执行结果已在 prompt，避免重复 */
+    if (window.__dsppPreLog === 'PRE-EXECUTED' && window.__toolFailCount === 0) {
+      _log('skip duplicate tool ' + nm + ' (pre-executed)');
+      return;
+    }
+  }
+  _origToolAndContinue(nm, args);
+};
+_log('__medianToolAndContinue wrapped (round limit ' + 6 + ')');
+
+/* 暴露诊断入口 */
+window.__dsppPlusDiag = function(){
+  return {
+    installed: true,
+    round: window.__medianRound || 0,
+    acLog: window.__acLog || '',
+    preLog: window.__dsppPreLog || '',
+    pendingToolResult: window.__pendingToolResult ? String(window.__pendingToolResult).slice(0, 120) : null,
+    toolFailCount: window.__toolFailCount || 0,
+    streamDone: window.__streamDone === true
+  };
+};
+_log('Median DSPP+ enhancement module installed');
+})();
