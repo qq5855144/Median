@@ -659,25 +659,36 @@ window.__autoContinue = function(){
         _log('text injected (' + txt.length + ' chars) via ' + (isCE ? 'execCommand' : 'nativeSetter'));
         setTimeout(function(){
           try {
-            /* 找发送按钮：primary 类 / data-testid send / aria-label */
+                        /* v3: 发送按钮定位——输入框附近优先 + 评分制匹配（修复误点 iconLabelPrimary 顶栏按钮） */
             var btn = null;
-            var cands = document.querySelectorAll('button, [role="button"]');
-            for (var k = 0; k < cands.length; k++) {
-              var b = cands[k];
+            function _scoreBtn(b){
               var cl = String(b.className || '') + ' ' + String(b.getAttribute && b.getAttribute('data-testid') || '') + ' ' + String(b.getAttribute && b.getAttribute('aria-label') || '');
-              if (/send|primary|submit|发送/i.test(cl)) { btn = b; break; }
+              var sc = 0;
+              if (/send|发送/i.test(cl)) sc += 100;
+              if (/submit/i.test(cl)) sc += 50;
+              if (/ds-button--primary/.test(cl) && /ds-button--circle|ds-button--filled/.test(cl)) sc += 60;
+              if (/iconLabelPrimary/.test(cl) && !/send|发送/.test(cl)) sc -= 80;
+              return sc;
             }
-            if (!btn) { /* 回退：向上找 primary 按钮（原逻辑） */
-              var pp = ta, dd = 0;
-              while (pp && dd < 6 && !btn) {
-                pp = pp.parentElement; if (!pp) break;
-                var bs = pp.querySelectorAll('[role="button"]');
-                for (var m = 0; m < bs.length; m++) {
-                  if (String(bs[m].className || '').indexOf('primary') > -1) { btn = bs[m]; break; }
-                }
-                dd++;
+            var _pp = ta, _dd = 0, _best = 0;
+            while (_pp && _dd < 8) {
+              _pp = _pp.parentElement; if (!_pp) break;
+              var _bs = _pp.querySelectorAll('button, [role="button"]');
+              for (var _m = 0; _m < _bs.length; _m++) {
+                var _sc = _scoreBtn(_bs[_m]);
+                if (_sc > _best) { _best = _sc; btn = _bs[_m]; }
+              }
+              if (btn && _best >= 50) break;
+              _dd++;
+            }
+            if (!btn || _best < 50) {
+              var _gs = document.querySelectorAll('button, [role="button"]');
+              for (var _g = 0; _g < _gs.length; _g++) {
+                var _sc2 = _scoreBtn(_gs[_g]);
+                if (_sc2 > _best) { _best = _sc2; btn = _gs[_g]; }
               }
             }
+            if (btn && _best <= 0) btn = null;
             if (btn) {
               var bk = Object.keys(btn).filter(function(x){ return x.indexOf('__reactProps') === 0; })[0];
               if (bk && btn[bk] && btn[bk].onClick) {
