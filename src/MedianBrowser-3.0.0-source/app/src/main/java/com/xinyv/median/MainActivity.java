@@ -268,6 +268,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private final ConcurrentHashMap<WebView, String> pageHosts = new ConcurrentHashMap<WebView, String>();
     private final ConcurrentHashMap<WebView, Boolean> adBlockActiveByView = new ConcurrentHashMap<WebView, Boolean>();
     private final ConcurrentHashMap<WebView, String> mobileUserAgents = new ConcurrentHashMap<WebView, String>();
+    private final ConcurrentHashMap<WebView, ScriptHandler> uaChHandlers = new ConcurrentHashMap<WebView, ScriptHandler>();
     private final ConcurrentHashMap<WebView, String> appliedSiteSettings = new ConcurrentHashMap<WebView, String>();
     private final ConcurrentHashMap<WebView, Boolean> cosmeticInjected = new ConcurrentHashMap<WebView, Boolean>();
     private final Set<WebView> unresponsiveWebViews = ConcurrentHashMap.newKeySet();
@@ -6319,6 +6320,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
         pageHosts.remove(view);
         adBlockActiveByView.remove(view);
         mobileUserAgents.remove(view);
+        ScriptHandler oldUaCh = uaChHandlers.remove(view);
+        if (oldUaCh != null) try { oldUaCh.remove(); } catch (RuntimeException ignored) {}
         appliedSiteSettings.remove(view);
         cosmeticInjected.remove(view);
         trustedHomeViews.remove(view);
@@ -7061,6 +7064,21 @@ public final class MainActivity extends Activity implements McpController.UiBind
             settings.setLoadWithOverviewMode(false);
         }
         if (!desiredUserAgent.equals(settings.getUserAgentString())) settings.setUserAgentString(desiredUserAgent);
+        applyUaChOverride(target, enabled);
+    }
+    private static final String UA_CH_OVERRIDE_JS = "(function(){try{var real=null;try{real=navigator.userAgentData;}catch(e){}var brands=(real&&real.brands)||[{brand:'Not/A)Brand',version:'24'},{brand:'Chromium',version:'150'}];var platform='Linux x86_64';var fake={brands:brands,mobile:false,platform:platform,getHighEntropyValues:function(hints){return Promise.resolve({architecture:'x86_64',bitness:'64',fullVersionList:brands,mobile:false,model:'',platform:'Linux',platformVersion:'',uaFullVersion:'150.0.0.0',wow64:false,formFactor:'Desktop'});},toJSON:function(){return {brands:brands,mobile:false,platform:platform};}};try{Object.defineProperty(navigator,'userAgentData',{get:function(){return fake;},configurable:true});}catch(e){}try{Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return 0;},configurable:true});}catch(e){}try{Object.defineProperty(navigator,'platform',{get:function(){return platform;},configurable:true});}catch(e){}try{Object.defineProperty(window,'ontouchstart',{get:function(){return undefined;},configurable:true});}catch(e){}try{Object.defineProperty(window,'ontouchmove',{get:function(){return undefined;},configurable:true});}catch(e){}try{Object.defineProperty(window,'ontouchend',{get:function(){return undefined;},configurable:true});}catch(e){}}catch(e){}})();";
+    /* 桌面模式下覆盖 UA-CH（navigator.userAgentData）——WebView 的 setUserAgentString 不改 UA-CH，
+       现代网站（如 chat.deepseek.com）用 userAgentData.mobile 判断设备，导致桌面版切换无效。 */
+    private void applyUaChOverride(WebView target, boolean desktop) {
+        if (target == null) return;
+        ScriptHandler old = uaChHandlers.remove(target);
+        if (old != null) try { old.remove(); } catch (RuntimeException ignored) {}
+        if (!desktop) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
+        try {
+            ScriptHandler handler = WebViewCompat.addDocumentStartJavaScript(target, UA_CH_OVERRIDE_JS, Collections.singleton("*"));
+            uaChHandlers.put(target, handler);
+        } catch (RuntimeException ignored) {}
     }
 
     private String desktopUserAgent(String mobile) {
