@@ -142,26 +142,45 @@
         for (var i = 0; i < tools.length; i++) {
             var t = tools[i];
             if (!t || !t.name) continue;
-            lines.push('- ' + t.name + ': ' + (t.description || ''));
+            var d = (t.description || '').replace(/\s+/g, ' ').trim();
+            if (d.length > 80) d = d.substring(0, 80) + '...';
+            lines.push('- ' + t.name + ': ' + d);
         }
-        return '[System: You have access to these local device tools via Median Bridge]\n'
+        return '[System: You have access to these Android device tools via Median Bridge. USE THEM when the user asks about device files/folders/apps or any action on this device.]\n'
+            + 'AVAILABLE TOOLS (use the EXACT name):\n'
             + lines.join('\n')
-            + '\n[File Workspace] You can read/write files on this Android device. Use median_workspace_info to see the current workspace; write generated content to files with median_write_file (relative path = inside workspace).\n'
-            + 'To call a tool, reply with EXACTLY this XML (nothing else):\n'
-            + '<median_tool_call><median_name>REAL_TOOL_NAME</median_name><median_args>{"arg1":"value1"}</median_args></median_tool_call>\n'
-            + 'IMPORTANT RULES:\n'
-            + '1. REAL_TOOL_NAME must be one of the ACTUAL tool names listed above (start with median_, github_, browser_ etc). NEVER invent or use placeholder names.\n'
-            + '2. <median_args> must contain ONLY the parameters that tool actually accepts (see description).\n'
-            + '3. Output the XML alone, without markdown code fences or extra text.\n'
-            + 'After the tool runs, its result will be sent to you automatically. Then answer the user based on the result.\n';
+            + '\nCall format (XML only, no markdown):\n'
+            + '<median_tool_call><median_name>fs_list_dir</median_name><median_args>{"path":"/storage/emulated/0/MT2/mcp"}</median_args></median_tool_call>\n'
+            + 'RULES:\n'
+            + '1. <median_name> MUST be one of the EXACT tool names in AVAILABLE TOOLS above (e.g. fs_list_dir, fs_read_file, fs_find_file, browser_screenshot). NEVER use placeholders like REAL_TOOL_NAME or INVOCATION_NAME.\n'
+            + '2. <median_args> contains only the parameters that tool accepts.\n'
+            + '3. Output the XML alone, nothing else.\n'
+            + 'After the tool runs, its result is sent to you automatically; answer using it.\n';
     }
 
+    /* ---------- 占位符工具名检测（AI 误用模板示例名时拦截并引导） ---------- */
+    function __isPlaceholderTool(name) {
+        var n = String(name || '').toLowerCase().replace(/[^a-z_]/g, '');
+        return n === 'real_tool_name' || n === 'invocation_name' || n === 'tool_name'
+            || n === 'example_tool' || n === 'example' || n === 'median_name' || n === 'median_args'
+            || n === 'none' || n === 'xxx' || n === 'tool' || n === 'tools';
+    }
     /* ---------- 调用工具（优先 GM 原生桥绕过 CSP；同步 XHR 兜底） ---------- */
     function gmRunTool(name, args, cb) {
         try {
+            if (__isPlaceholderTool(name)) {
+                var hint = JSON.stringify({ ok: false, error: 'Placeholder tool name "' + name + '" is not a real tool. Use an EXACT name from the AVAILABLE TOOLS list, e.g. fs_list_dir or fs_read_file.' });
+                try { console.warn('[MedianGPT++] placeholder tool blocked:', name); } catch (e) { /* ignore */ }
+                if (cb) cb(hint);
+                return true;
+            }
             if (typeof GM_xmlhttpRequest === 'function') {
                 var iv = name;
-                if (iv.indexOf('median_') === 0) iv = 'fs_' + iv.substring(7);
+                if (iv.indexOf('median_') === 0) {
+                    var bare = iv.substring(7);
+                    if (bare === 'workspace_info' || bare === 'workspace_set') iv = bare;
+                    else iv = 'fs_' + bare;
+                }
                 var a = args || {};
                 if (a.directory !== undefined && a.dir === undefined) a.dir = a.directory;
                 if (iv === 'fs_find_file' && a.path !== undefined && a.dir === undefined) a.dir = a.path;
@@ -190,8 +209,15 @@
     }
     function runTool(name, args) {
         try {
+            if (__isPlaceholderTool(name)) {
+                return JSON.stringify({ ok: false, error: 'Placeholder tool name "' + name + '" is not a real tool. Use an EXACT name from the AVAILABLE TOOLS list.' });
+            }
             var iv = name;
-            if (iv.indexOf('median_') === 0) iv = 'fs_' + iv.substring(7);
+            if (iv.indexOf('median_') === 0) {
+                var bare = iv.substring(7);
+                if (bare === 'workspace_info' || bare === 'workspace_set') iv = bare;
+                else iv = 'fs_' + bare;
+            }
             var a = args || {};
             if (a.directory !== undefined && a.dir === undefined) a.dir = a.directory;
             if (iv === 'fs_find_file' && a.path !== undefined && a.dir === undefined) a.dir = a.path;
