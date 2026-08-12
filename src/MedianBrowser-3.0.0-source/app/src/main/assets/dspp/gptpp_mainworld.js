@@ -158,6 +158,7 @@
             + '2. <median_args> contains only the parameters that tool accepts.\n'
             + '3. When the user gives a specific path, use it EXACTLY as provided — never substitute other paths. If a path/result was already injected by the system, do NOT re-call tools for it; use the injected data directly.\n'
             + '4. Output the XML alone, nothing else.\n'
+            + '5. If the user asks to analyze an APK, its structure (zip entries + AndroidManifest) is ALREADY injected by the system — just analyze it, do NOT call mt_apk_open / mt_apk_list / fs_list_dir yourself.\n'
             + 'After the tool runs, its result is sent to you automatically; answer using it.\n';
     }
 
@@ -331,14 +332,58 @@
         });
     }
 
+    /* ---------- 从请求体中提取用户指定的 .apk 目标文件 ---------- */
+    function extractApkTarget(text) {
+        try {
+            var t = String(text || '');
+            var m = t.match(/([^\s"\\,，。;；]+\.apk(?:\.zip)?)/i);
+            if (m) return m[1].replace(/\/+$/, '');
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    /* ---------- 解析 mt_apk_open 返回中的 workspaceId（多层 JSON 转义） ---------- */
+    function __parseWsId(res) {
+        try {
+            var obj = typeof res === 'string' ? JSON.parse(res) : res;
+            if (obj && typeof obj.result === 'string') obj = JSON.parse(obj.result);
+            if (obj && obj.data && obj.data.workspaceId) return obj.data.workspaceId;
+            if (obj && obj.workspaceId) return obj.workspaceId;
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    /* ---------- APK 隐形预执行：open -> list zip -> read Manifest，返回摘要 ---------- */
+    function __apkPrefetch(apkPath) {
+        var rel = apkPath;
+        if (rel.charAt(0) === '/') rel = rel.split('/').pop();
+        return __gmCall('remote.mtmcp.mt_apk_open', { path: rel }).then(function (openRes) {
+            if (!openRes) return null;
+            var ws = __parseWsId(openRes);
+            var openInfo = String(openRes).slice(0, 700);
+            if (!ws) return '[mt_apk_open 结果]\n' + openInfo;
+            var p1 = __gmCall('remote.mtmcp.mt_apk_list', { workspaceId: ws, view: 'zip_entries', limit: 200 }).then(function (listRes) {
+                return listRes ? '[APK ZIP 条目]\n' + String(listRes).slice(0, 2500) : '';
+            });
+            var p2 = __gmCall('remote.mtmcp.mt_apk_read_text', { workspaceId: ws, locator: 'axml:AndroidManifest.xml', limit: 300, maxChars: 15000 }).then(function (mfRes) {
+                return mfRes ? '[AndroidManifest.xml 解码]\n' + String(mfRes).slice(0, 8000) : '';
+            });
+            return Promise.all([p1, p2]).then(function (parts) {
+                return '[APK 已自动打开并解析（workspaceId=' + ws + '），直接基于以下内容回答，无需再调用 mt_apk_* / fs_* 工具]\n' + openInfo + '\n' + parts.join('\n');
+            });
+        });
+    }
+
     /* ---------- 构造注入的系统文本（工具结果 + 路径提示） ---------- */
-    function buildInjectedText(rawBody, pathHint, pathResult) {
+    function buildInjectedText(rawBody, pathHint, pathResult, apkResult) {
         var inj = '';
         if (__pendingResult) {
             inj = '[System: 工具执行结果]\n' + __pendingResult + '\n[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。]\n';
             __pendingResult = null;
         }
-        if (pathResult) {
+        if (apkResult) {
+            inj += '[System: 已自动打开并解析用户指定的 APK，直接基于它回答，无需再调用 mt_apk_* 或 fs_* 工具]\n' + apkResult + '\n';
+        } else if (pathResult) {
             inj += '[System: 已自动调用 fs_list_dir 列出路径「' + pathHint + '」的目录内容（即当前工作区），直接基于它回答，无需重复调用]\n' + pathResult + '\n';
         }
         var sysText = inj + sysPrompt();
@@ -393,15 +438,21 @@
             var req = JSON.parse(rawBody);
             if (!req) return Promise.resolve(null);
             var pathHint = extractUserPath(rawBody);
+            var apkTarget = extractApkTarget(rawBody);
             var prefetchP = Promise.resolve(null);
-            if (pathHint) {
+            var apkResultP = Promise.resolve(null);
+            if (apkTarget) {
+                /* 用户消息含 .apk 目标：自动打开并解析 APK 结构（无需 AI 自己调用 mt_apk_*） */
+                apkResultP = __apkPrefetch(apkTarget);
+                prefetchP = apkResultP;
+            } else if (pathHint) {
                 /* 先把工作区设为用户指定路径，再自动列出目录内容（AI 后续可用相对路径操作） */
                 prefetchP = __gmCall('workspace_set', { path: pathHint }).then(function (wsRes) {
                     return __gmCall('fs_list_dir', { path: pathHint });
                 });
             }
-            return prefetchP.then(function (pathResult) {
-                return injectIntoBody(req, buildInjectedText(rawBody, pathHint, pathResult));
+            return prefetchP.then(function (result) {
+                return injectIntoBody(req, buildInjectedText(rawBody, pathHint, apkTarget ? null : result, apkTarget ? result : null));
             });
         } catch (e) {
             return Promise.resolve(null);
