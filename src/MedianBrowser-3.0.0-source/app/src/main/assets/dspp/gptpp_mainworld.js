@@ -147,14 +147,16 @@
             lines.push('- ' + t.name + ': ' + d);
         }
         return '[System: You have access to these Android device tools via Median Bridge. They are REAL and available right now — never tell the user you cannot access their device. USE THEM when the user asks about device files/folders/apps or any action on this device.]\n'
+            + 'WORKSPACE: Median has a workspace concept. Call workspace_info to see the current workspace path. fs_* tools accept RELATIVE paths (resolved against the workspace) AND absolute paths. When the user mentions a folder, you may set it as the workspace via workspace_set first, then use relative paths.\n'
+            + 'APK ANALYSIS: To deeply analyze an APK, use the remote.mtmcp.mt_apk_* tools (they use relative paths based on their own root): mt_apk_open opens an APK, then mt_apk_list lists zip entries/dex classes, mt_apk_read_text reads AndroidManifest.xml/dex text, mt_apk_resource_read reads resources, mt_apk_dex_outline_class reads dex classes, mt_apk_close closes it. Start with mt_apk_list_available_apks or mt_apk_open.\n'
             + 'AVAILABLE TOOLS (use the EXACT name):\n'
             + lines.join('\n')
             + '\nCall format (XML only, no markdown):\n'
-            + '<median_tool_call><median_name>fs_list_dir</median_name><median_args>{"path":"/storage/emulated/0/MT2/mcp"}</median_args></median_tool_call>\n'
+            + '<median_tool_call><median_name>fs_list_dir</median_name><median_args>{"path":"."}</median_args></median_tool_call>\n'
             + 'RULES:\n'
-            + '1. <median_name> MUST be one of the EXACT tool names in AVAILABLE TOOLS above (e.g. fs_list_dir, fs_read_file, fs_find_file, browser_screenshot). NEVER use placeholders like REAL_TOOL_NAME or INVOCATION_NAME.\n'
+            + '1. <median_name> MUST be one of the EXACT tool names in AVAILABLE TOOLS above (e.g. fs_list_dir, fs_read_file, fs_find_file, remote.mtmcp.mt_apk_open, browser_screenshot). NEVER use placeholders like REAL_TOOL_NAME or INVOCATION_NAME.\n'
             + '2. <median_args> contains only the parameters that tool accepts.\n'
-            + '3. When the user gives a specific path (e.g. /storage/emulated/0/MT2/mcp), use it EXACTLY as provided — never substitute other paths.\n'
+            + '3. When the user gives a specific path, use it EXACTLY as provided — never substitute other paths. If a path/result was already injected by the system, do NOT re-call tools for it; use the injected data directly.\n'
             + '4. Output the XML alone, nothing else.\n'
             + 'After the tool runs, its result is sent to you automatically; answer using it.\n';
     }
@@ -337,11 +339,11 @@
             __pendingResult = null;
         }
         if (pathResult) {
-            inj += '[System: 已自动调用 fs_list_dir 列出用户指定路径的目录内容，直接基于它回答，无需重复调用]\n' + pathResult + '\n';
+            inj += '[System: 已自动调用 fs_list_dir 列出路径「' + pathHint + '」的目录内容（即当前工作区），直接基于它回答，无需重复调用]\n' + pathResult + '\n';
         }
         var sysText = inj + sysPrompt();
         if (pathHint) {
-            sysText += '\n[IMPORTANT] The user mentioned this exact path: ' + pathHint + '. Use it EXACTLY as given for fs_list_dir/fs_read_file/fs_find_file — never use any other path (do NOT substitute /sdcard/Download or any example path).\n';
+            sysText += '\n[IMPORTANT] The user mentioned this exact path: ' + pathHint + '. It is the workspace. Use it EXACTLY (or relative paths based on it) for fs_* tools — never substitute other paths (do NOT substitute /sdcard/Download or any example path). If directory content was already injected above, do NOT re-call fs_list_dir.\n';
         }
         return sysText;
     }
@@ -391,7 +393,13 @@
             var req = JSON.parse(rawBody);
             if (!req) return Promise.resolve(null);
             var pathHint = extractUserPath(rawBody);
-            var prefetchP = pathHint ? __gmCall('fs_list_dir', { path: pathHint }) : Promise.resolve(null);
+            var prefetchP = Promise.resolve(null);
+            if (pathHint) {
+                /* 先把工作区设为用户指定路径，再自动列出目录内容（AI 后续可用相对路径操作） */
+                prefetchP = __gmCall('workspace_set', { path: pathHint }).then(function (wsRes) {
+                    return __gmCall('fs_list_dir', { path: pathHint });
+                });
+            }
             return prefetchP.then(function (pathResult) {
                 return injectIntoBody(req, buildInjectedText(rawBody, pathHint, pathResult));
             });

@@ -868,11 +868,14 @@ public final class McpService implements MiniHttpServer.Handler {
         return total;
     }
 
-    /** 列出目录内容（DeepSeek++ 文件桥）。 */
+    /** 列出目录内容（DeepSeek++ 文件桥）。支持相对路径（基于工作区）与绝对路径。 */
     private JSONObject fsListDir(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String path = args.optString("path", "/sdcard/Download");
+        String path = args.optString("path", "");
+        if (path.isEmpty()) path = workspaceDir();
+        else path = resolvePath(path);
+        if (path == null) path = workspaceDir();
         java.io.File dir = new java.io.File(path);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "目录不存在: " + path));
@@ -897,11 +900,13 @@ public final class McpService implements MiniHttpServer.Handler {
         return new JSONObject().put("result", new JSONObject()
                 .put("ok", true).put("path", path).put("items", items));
     }
-    /** 读取文件（DeepSeek++ 文件桥）。文本默认，二进制 base64。 */
+    /** 读取文件（DeepSeek++ 文件桥）。文本默认，二进制 base64。支持相对路径（基于工作区）。 */
     private JSONObject fsReadFile(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String path = args.optString("path", "");
+        String raw = args.optString("path", "");
+        String path = resolvePath(raw);
+        if (path == null) path = raw;
         int maxBytes = args.optInt("maxBytes", 1048576);
         boolean binary = args.optBoolean("binary", false);
         java.io.File f = new java.io.File(path);
@@ -933,11 +938,14 @@ public final class McpService implements MiniHttpServer.Handler {
             in.close();
         }
     }
-    /** 按文件名模式搜索（DeepSeek++ 文件桥）。 */
+    /** 按文件名模式搜索（DeepSeek++ 文件桥）。dir 支持相对路径（基于工作区）。 */
     private JSONObject fsFindFile(JSONObject args) throws Exception {
         if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return new JSONObject().put("result", new JSONObject()
                 .put("ok", false).put("error", "缺少\u201c所有文件访问\u201d权限：请在系统设置-应用-Median-权限中开启"));
-        String dirPath = args.optString("dir", "/sdcard/Download");
+        String rawDir = args.optString("dir", args.optString("path", ""));
+        String dirPath = resolvePath(rawDir);
+        if (dirPath == null) dirPath = (rawDir == null || rawDir.isEmpty()) ? "/sdcard/Download" : rawDir;
+        if (rawDir.isEmpty()) dirPath = workspaceDir();
         String pattern = args.optString("pattern", "*.apk");
         java.io.File dir = new java.io.File(dirPath);
         if (!dir.exists() || !dir.isDirectory()) return new JSONObject().put("result", new JSONObject()
