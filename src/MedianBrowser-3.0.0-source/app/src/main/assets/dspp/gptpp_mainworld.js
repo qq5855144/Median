@@ -154,7 +154,8 @@
             + 'RULES:\n'
             + '1. <median_name> MUST be one of the EXACT tool names in AVAILABLE TOOLS above (e.g. fs_list_dir, fs_read_file, fs_find_file, browser_screenshot). NEVER use placeholders like REAL_TOOL_NAME or INVOCATION_NAME.\n'
             + '2. <median_args> contains only the parameters that tool accepts.\n'
-            + '3. Output the XML alone, nothing else.\n'
+            + '3. When the user gives a specific path (e.g. /storage/emulated/0/MT2/mcp), use it EXACTLY as provided — never substitute other paths.\n'
+            + '4. Output the XML alone, nothing else.\n'
             + 'After the tool runs, its result is sent to you automatically; answer using it.\n';
     }
 
@@ -415,15 +416,26 @@
         try {
             if (__autoContinueCount >= 5) return;
             __autoContinueCount++;
-            var ta = document.querySelector('textarea[data-testid="prompt-textarea"], textarea');
+            var ta = document.querySelector('textarea');
             if (!ta) { try { console.log('[MedianGPT++] auto-continue: no textarea'); } catch (e) { /* ignore */ } return; }
             var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
             setter.call(ta, '[median_tool_result_ack]');
             ta.dispatchEvent(new Event('input', { bubbles: true }));
             ta.focus();
-            var btn = document.querySelector('button[data-testid="send-button"], button[type="submit"], button[aria-label*="Send" i]');
-            if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount); } catch (e) { /* ignore */ } }
-            else { try { console.log('[MedianGPT++] auto-continue: no send button'); } catch (e) { /* ignore */ } }
+            /* 等待 React 渲染出发送按钮（空输入时不显示） */
+            setTimeout(function () {
+                try {
+                    var btn = document.querySelector('button[data-testid="send-button"], button[data-testid="composer-send-button"], button[data-testid="submit-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
+                    if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount + ' (click)'); } catch (e) { /* ignore */ } return; }
+                    /* 兜底：Enter 键发送 */
+                    try { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })); } catch (e) { /* ignore */ }
+                    setTimeout(function () {
+                        var btn2 = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
+                        if (btn2) btn2.click();
+                        try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount + ' (enter/retry)'); } catch (e) { /* ignore */ }
+                    }, 600);
+                } catch (e) { /* ignore */ }
+            }, 500);
         } catch (e) { /* ignore */ }
     }
 
