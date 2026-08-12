@@ -256,7 +256,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private final ConcurrentHashMap<String, HttpURLConnection> scriptConnections = new ConcurrentHashMap<String, HttpURLConnection>();
     /** 脚本桥诊断环形缓冲（release 构建 logcat 不可见，通过 dspp_diag 远程读取） */
     private final java.util.List<String> bridgeDiag = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
-    private volatile boolean lnpGuideShown = false;
     private void bridgeDiagLog(String msg) {
         try {
             synchronized (bridgeDiag) {
@@ -266,30 +265,10 @@ public final class MainActivity extends Activity implements McpController.UiBind
         } catch (RuntimeException ignored) {}
     }
 
-    /** 引导用户去系统设置开启"本地网络"权限（Android16 LNP） */
+    /** 引导用户去系统设置开启"本地网络"权限（已废弃：根因是应用内守卫而非系统权限，保留空实现避免引用缺失） */
+    @Deprecated
     private void guideLocalNetworkPermission() {
-        if (lnpGuideShown) return;
-        lnpGuideShown = true;
-        bridgeDiagLog("LNP guide dialog shown");
-        try {
-            new AlertDialog.Builder(this)
-                    .setTitle("需要「本地网络」权限")
-                    .setMessage("AI++ 注入脚本需要通过本机 MCP 服务(127.0.0.1:8788)获取工具列表，\nAndroid 16 要求应用持有「本地网络」权限。\n请点击下方按钮，在系统设置中开启「本地网络」后返回。")
-                    .setPositiveButton("去设置", new android.content.DialogInterface.OnClickListener() {
-                        @Override public void onClick(android.content.DialogInterface dialog, int which) {
-                            try {
-                                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        android.net.Uri.parse("package:" + getPackageName()));
-                                startActivity(intent);
-                            } catch (Exception ignored) {
-                                try { startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)); } catch (Exception ignored2) {}
-                            }
-                        }
-                    })
-                    .setNegativeButton("稍后", null)
-                    .setCancelable(true)
-                    .show();
-        } catch (RuntimeException ignored) {}
+        bridgeDiagLog("LNP guide ignored (root cause was app guard, not system permission)");
     }
     private volatile boolean filterUpdateInProgress;
     private boolean autoPictureInPicture;
@@ -408,31 +387,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 if (!mcpAuto.isRunning()) mcpAuto.start(this);
             } catch (Exception ignored) {
             }
-        }
-        // Android 16+ 本地网络保护：GM 桥（app 进程 HttpURLConnection 连 127.0.0.1:8788）
-        // 必须持有 ACCESS_LOCAL_NETWORK 运行时权限，否则抛 "local network target denied"
-        if (Build.VERSION.SDK_INT >= 36) {
-            try {
-                if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
-                    uiHandler.postDelayed(new Runnable() {
-                        @Override public void run() {
-                            try {
-                                if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
-                                    if (lnpGuideShown) {
-                                        // 已在本次进程生命周期内拒绝过：不再重复弹系统权限框，直接引导去设置
-                                        guideLocalNetworkPermission();
-                                    } else {
-                                        requestPermissions(new String[] { "android.permission.ACCESS_LOCAL_NETWORK" }, 410);
-                                        bridgeDiagLog("ACCESS_LOCAL_NETWORK permission requested");
-                                    }
-                                }
-                            } catch (RuntimeException ignored) {}
-                        }
-                    }, 1200);
-                } else {
-                    bridgeDiagLog("ACCESS_LOCAL_NETWORK already granted");
-                }
-            } catch (RuntimeException ignored) {}
         }
         services = new BrowserServices(this);
         scriptExecutor = newIdleExecutor(1);
@@ -1587,19 +1541,9 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 boolean allowed = callbackId.matches("[A-Za-z0-9_-]{1,96}") && isHttpUrl(url) &&
                         scriptStore.canConnect(scriptId, url, currentUrl);
                 bridgeDiagLog("xhr action cb=" + callbackId + " allowed=" + allowed + " url=" + url + " page=" + (currentUrl == null ? "NULL" : currentUrl) + " runnable=" + scriptStore.isRunnable(scriptId) + " match=" + scriptStore.matchesUrl(scriptId, currentUrl) + " tokenOk=" + (token.length() >= 32 && token.equals(expectedToken)));
-                // Android 16+ 本地网络保护：权限未授予时直接拦截（不再反复弹系统权限框，onCreate 已请求过；拒绝后走引导对话框）
-                boolean lnpBlocked = false;
-                if (allowed && Build.VERSION.SDK_INT >= 36) {
-                    try {
-                        if (checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
-                            bridgeDiagLog("xhr blocked by LNP cb=" + callbackId + " guideShown=" + lnpGuideShown);
-                            if (!lnpGuideShown) guideLocalNetworkPermission();
-                            lnpBlocked = true;
-                        }
-                    } catch (RuntimeException ignored) {}
-                }
-                if (allowed && !lnpBlocked) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
-                response = (allowed && !lnpBlocked) ? bridgeOk(true) : bridgeError(lnpBlocked ? "local network permission pending" : "@connect denied");
+                // 本地目标放行判断已内置于 startScriptRequest 守卫（授权 @connect 放行）
+                if (allowed) startScriptRequest(source, token, scriptId, callbackId, args, currentUrl);
+                response = allowed ? bridgeOk(true) : bridgeError("@connect denied");
             } else if ("xhrAbort".equals(action)) {
                 HttpURLConnection connection = scriptConnections.remove(token + "|" + args.optString("i", ""));
                 if (connection != null) connection.disconnect();
@@ -1642,7 +1586,11 @@ public final class MainActivity extends Activity implements McpController.UiBind
                         if (!scriptStore.canConnect(scriptId, current.toString(), pageUrl)) throw new IllegalArgumentException("@connect denied after redirect");
                         boolean pageIsLocal = NetworkSecurity.isLocalOrPrivateHost(NetworkSecurity.normalizedHost(page));
                         boolean targetIsLocal = NetworkSecurity.isLocalOrPrivateHost(NetworkSecurity.normalizedHost(current));
-                        if (targetIsLocal && !pageIsLocal) throw new IllegalArgumentException("local network target denied");
+                        // 守卫：本地目标仅对「非本地页面且未授权 @connect」的请求拒绝；
+                        // 已通过 canConnect 授权（含 @connect 127.0.0.1:8788）的脚本放行
+                        if (targetIsLocal && !pageIsLocal && !scriptStore.canConnect(scriptId, current.toString(), pageUrl)) {
+                            throw new IllegalArgumentException("local network target denied");
+                        }
 
                         connection = (HttpURLConnection) current.openConnection();
                         scriptConnections.put(key, connection);
@@ -7524,7 +7472,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         for (int result : grantResults) if (result != PackageManager.PERMISSION_GRANTED) granted = false;
         if (requestCode == 410) {
             bridgeDiagLog("ACCESS_LOCAL_NETWORK result granted=" + granted + " perms=" + java.util.Arrays.toString(permissions));
-            if (!granted) guideLocalNetworkPermission();
         }
         if (requestCode == WEB_PERMISSION_REQUEST && pendingPermissionRequest != null) {
             if (granted && pendingWebPermissionResources != null && pendingPermissionView == webView &&
