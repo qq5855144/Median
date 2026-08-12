@@ -418,25 +418,53 @@
             __autoContinueCount++;
             var ta = document.querySelector('textarea');
             if (!ta) { try { console.log('[MedianGPT++] auto-continue: no textarea'); } catch (e) { /* ignore */ } return; }
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            setter.call(ta, '[median_tool_result_ack]');
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
             ta.focus();
+            /* React 可靠输入：优先 execCommand（触发 onChange），其次 native setter + InputEvent */
+            var textInjected = false;
+            try {
+                /* 光标移末尾再插入，避免插到中间 */
+                try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* ignore */ }
+                document.execCommand('insertText', false, '[median_tool_result_ack]');
+                textInjected = (ta.value.indexOf('[median_tool_result_ack]') >= 0);
+            } catch (e) { textInjected = false; }
+            if (!textInjected) {
+                try {
+                    var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                    setter.call(ta, '[median_tool_result_ack]');
+                    ta.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '[median_tool_result_ack]' }));
+                    textInjected = (ta.value.indexOf('[median_tool_result_ack]') >= 0);
+                    if (textInjected) { try { console.log('[MedianGPT++] auto-continue: execCommand failed, used setter fallback'); } catch (e) { /* ignore */ } }
+                } catch (e2) { /* ignore */ }
+            }
+            if (!textInjected) { try { console.log('[MedianGPT++] auto-continue: TEXT INJECTION FAILED (value unchanged)'); } catch (e) { /* ignore */ } }
             /* 等待 React 渲染出发送按钮（空输入时不显示） */
             setTimeout(function () {
                 try {
                     var btn = document.querySelector('button[data-testid="send-button"], button[data-testid="composer-send-button"], button[data-testid="submit-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
-                    if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount + ' (click)'); } catch (e) { /* ignore */ } return; }
-                    /* 兜底：Enter 键发送 */
-                    try { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })); } catch (e) { /* ignore */ }
+                    if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue CLICKED send #' + __autoContinueCount); } catch (e) { /* ignore */ } __verifySend(__autoContinueCount); return; }
+                    /* 兜底：Enter 键发送（带完整按键属性） */
+                    try { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
                     setTimeout(function () {
                         var btn2 = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
-                        if (btn2) btn2.click();
-                        try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount + ' (enter/retry)'); } catch (e) { /* ignore */ }
-                    }, 600);
+                        if (btn2) { btn2.click(); try { console.log('[MedianGPT++] auto-continue CLICKED send(2) #' + __autoContinueCount); } catch (e) { /* ignore */ } }
+                        else { try { console.log('[MedianGPT++] auto-continue: send button STILL not found'); } catch (e) { /* ignore */ } }
+                        __verifySend(__autoContinueCount);
+                    }, 700);
                 } catch (e) { /* ignore */ }
-            }, 500);
+            }, 450);
         } catch (e) { /* ignore */ }
+    }
+
+    /* 发送后验证：1.5s 后 textarea 应被清空（发送成功的铁证） */
+    function __verifySend(n) {
+        setTimeout(function () {
+            try {
+                var ta = document.querySelector('textarea');
+                if (!ta) { try { console.log('[MedianGPT++] auto-continue VERIFY #' + n + ': textarea gone'); } catch (e) { /* ignore */ } return; }
+                if (ta.value === '') { try { console.log('[MedianGPT++] auto-continue VERIFIED send #' + n + ' (textarea cleared)'); } catch (e) { /* ignore */ } }
+                else { try { console.log('[MedianGPT++] auto-continue SEND FAILED #' + n + ' (value still: ' + ta.value.slice(0, 30) + ')'); } catch (e) { /* ignore */ } }
+            } catch (e) { /* ignore */ }
+        }, 1500);
     }
 
     /* ---------- fetch 拦截 ---------- */
