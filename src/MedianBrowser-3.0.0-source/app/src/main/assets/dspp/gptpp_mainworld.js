@@ -146,7 +146,7 @@
             if (d.length > 80) d = d.substring(0, 80) + '...';
             lines.push('- ' + t.name + ': ' + d);
         }
-        return '[System: You have access to these Android device tools via Median Bridge. USE THEM when the user asks about device files/folders/apps or any action on this device.]\n'
+        return '[System: You have access to these Android device tools via Median Bridge. They are REAL and available right now — never tell the user you cannot access their device. USE THEM when the user asks about device files/folders/apps or any action on this device.]\n'
             + 'AVAILABLE TOOLS (use the EXACT name):\n'
             + lines.join('\n')
             + '\nCall format (XML only, no markdown):\n'
@@ -353,6 +353,7 @@
                 return reader.read().then(function (res) {
                     if (res.done) {
                         controller.close();
+                        __scheduleAutoContinue();
                         return;
                     }
                     var chunk = decoder.decode(res.value, { stream: true });
@@ -393,6 +394,37 @@
         } catch (e) {
             __pendingResult = JSON.stringify({ ok: false, error: String((e && e.message) || e) });
         }
+    }
+
+    /* ---------- 自动继续：工具结果回灌后自动发送下一条消息（实现 AI 自主多轮） ---------- */
+    var __autoContinueCount = 0;
+    function __scheduleAutoContinue() {
+        try {
+            if (__autoContinueCount >= 5) return;
+            var t0 = Date.now();
+            (function poll() {
+                try {
+                    if (__pendingResult) { __autoContinue(); return; }
+                    if (Date.now() - t0 > 15000) { try { console.log('[MedianGPT++] auto-continue: no pending result, stop'); } catch (e) { /* ignore */ } return; }
+                    setTimeout(poll, 500);
+                } catch (e) { /* ignore */ }
+            })();
+        } catch (e) { /* ignore */ }
+    }
+    function __autoContinue() {
+        try {
+            if (__autoContinueCount >= 5) return;
+            __autoContinueCount++;
+            var ta = document.querySelector('textarea[data-testid="prompt-textarea"], textarea');
+            if (!ta) { try { console.log('[MedianGPT++] auto-continue: no textarea'); } catch (e) { /* ignore */ } return; }
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(ta, '[median_tool_result_ack]');
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.focus();
+            var btn = document.querySelector('button[data-testid="send-button"], button[type="submit"], button[aria-label*="Send" i]');
+            if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue sent #' + __autoContinueCount); } catch (e) { /* ignore */ } }
+            else { try { console.log('[MedianGPT++] auto-continue: no send button'); } catch (e) { /* ignore */ } }
+        } catch (e) { /* ignore */ }
     }
 
     /* ---------- fetch 拦截 ---------- */
