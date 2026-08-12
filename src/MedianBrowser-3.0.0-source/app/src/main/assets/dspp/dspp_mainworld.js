@@ -731,10 +731,22 @@ window.__autoContinue = function(){
         }, i === 0 ? 150 : 400);
       } catch(e){ _log('sendOne err: ' + (e && e.message || e)); }
     }
-    for (var i = 0; i < at.length; i++) { setTimeout(function(idx){ sendOne(idx); }, at[idx]); }
+    setTimeout(function(){ sendOne(0); }, at[0]);
+    setTimeout(function(){ sendOne(1); }, at[1]);
+    setTimeout(function(){ sendOne(2); }, at[2]);
   } catch(e){ _log('autoContinue err: ' + (e && e.message || e)); }
 };
 _log('__autoContinue patched (execCommand + VERIFIED + round limit)');
+/* v2: 修复 r103 工具名映射 median_workspace_info/set -> workspace_info/set */
+var _origRunMedianTool = window.__runMedianTool;
+if (typeof _origRunMedianTool === 'function') {
+  window.__runMedianTool = function(name, args) {
+    if (name === 'median_workspace_info') return _origRunMedianTool('workspace_info', args);
+    if (name === 'median_workspace_set') return _origRunMedianTool('workspace_set', args);
+    return _origRunMedianTool(name, args);
+  };
+  _log('__runMedianTool wrapped (workspace mapping fix)');
+}
 
 /* ---------- 2. 路径预执行：外层 fetch 包装 ---------- */
 /* 用户消息（非工具继续）含绝对路径 → 预执行 fs_list_dir / fs_read_file
