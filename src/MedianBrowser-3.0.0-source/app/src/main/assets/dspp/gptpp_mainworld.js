@@ -305,42 +305,98 @@
     }
 
     /* ---------- 注入请求体：messages / input 前插 system 消息 ---------- */
+    /* ---------- 从请求体中提取用户指定的绝对路径 ---------- */
+    function extractUserPath(text) {
+        try {
+            var t = String(text || '');
+            var m = t.match(/(?:\/storage\/emulated\/\d+\/[^\s"\\,，。;；]+|\/sdcard\/[^\s"\\,，。;；]+|\/data\/[^\s"\\,，。;；]+)/);
+            if (m) return m[1].replace(/\/+$/, '');
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    /* ---------- GM 桥调用封装为 Promise（供路径预取） ---------- */
+    function __gmCall(name, args) {
+        return new Promise(function (resolve) {
+            var done = false;
+            var timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, 6000);
+            try {
+                if (!gmRunTool(name, args, function (r) { if (!done) { done = true; clearTimeout(timer); resolve(r); } })) {
+                    var r2 = runTool(name, args);
+                    if (!done) { done = true; clearTimeout(timer); resolve(r2); }
+                }
+            } catch (e) { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
+        });
+    }
+
+    /* ---------- 构造注入的系统文本（工具结果 + 路径提示） ---------- */
+    function buildInjectedText(rawBody, pathHint, pathResult) {
+        var inj = '';
+        if (__pendingResult) {
+            inj = '[System: 工具执行结果]\n' + __pendingResult + '\n[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。]\n';
+            __pendingResult = null;
+        }
+        if (pathResult) {
+            inj += '[System: 已自动调用 fs_list_dir 列出用户指定路径的目录内容，直接基于它回答，无需重复调用]\n' + pathResult + '\n';
+        }
+        var sysText = inj + sysPrompt();
+        if (pathHint) {
+            sysText += '\n[IMPORTANT] The user mentioned this exact path: ' + pathHint + '. Use it EXACTLY as given for fs_list_dir/fs_read_file/fs_find_file — never use any other path (do NOT substitute /sdcard/Download or any example path).\n';
+        }
+        return sysText;
+    }
+
+    /* ---------- 将系统消息注入请求体（旧版 messages / 新版 Responses-API） ---------- */
+    function injectIntoBody(req, sysText) {
+        /* 旧版格式: {author:{role:'system'}, content:{content_type:'text', parts:[...]}} */
+        var sysMsgOld = {
+            author: { role: 'system' },
+            content: { content_type: 'text', parts: [sysText] }
+        };
+        /* 新版格式: {role:'system', content:[{type:'input_text', text:'...'}]} */
+        var sysMsgNew = { role: 'system', content: [{ type: 'input_text', text: sysText }] };
+        if (req.messages && Array.isArray(req.messages)) {
+            var hasNewFormat = false;
+            for (var i = 0; i < req.messages.length; i++) {
+                var m = req.messages[i];
+                if (m && typeof m.role === 'string' && Array.isArray(m.content)) { hasNewFormat = true; break; }
+            }
+            req.messages.unshift(hasNewFormat ? sysMsgNew : sysMsgOld);
+            return JSON.stringify(req);
+        }
+        /* 新版 Responses-API 请求体: {model, instructions, input:[...]} */
+        if (req.input && Array.isArray(req.input)) {
+            req.input.unshift({ role: 'system', content: [{ type: 'input_text', text: sysText }] });
+            if (typeof req.instructions === 'string') req.instructions = sysText + '\n' + req.instructions;
+            else req.instructions = sysText;
+            return JSON.stringify(req);
+        }
+        return null;
+    }
+
     function augmentBody(rawBody) {
         try {
             var req = JSON.parse(rawBody);
             if (!req) return null;
-            var inj = '';
-            if (__pendingResult) {
-                inj = '[System: 工具执行结果]\n' + __pendingResult + '\n[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。]\n';
-                __pendingResult = null;
-            }
-            var sysText = inj + sysPrompt();
-            /* 旧版格式: {author:{role:'system'}, content:{content_type:'text', parts:[...]}} */
-            var sysMsgOld = {
-                author: { role: 'system' },
-                content: { content_type: 'text', parts: [sysText] }
-            };
-            /* 新版格式: {role:'system', content:[{type:'input_text', text:'...'}]} */
-            var sysMsgNew = { role: 'system', content: [{ type: 'input_text', text: sysText }] };
-            if (req.messages && Array.isArray(req.messages)) {
-                var hasNewFormat = false;
-                for (var i = 0; i < req.messages.length; i++) {
-                    var m = req.messages[i];
-                    if (m && typeof m.role === 'string' && Array.isArray(m.content)) { hasNewFormat = true; break; }
-                }
-                req.messages.unshift(hasNewFormat ? sysMsgNew : sysMsgOld);
-                return JSON.stringify(req);
-            }
-            /* 新版 Responses-API 请求体: {model, instructions, input:[...]} */
-            if (req.input && Array.isArray(req.input)) {
-                req.input.unshift({ role: 'system', content: [{ type: 'input_text', text: sysText }] });
-                if (typeof req.instructions === 'string') req.instructions = sysText + '\n' + req.instructions;
-                else req.instructions = sysText;
-                return JSON.stringify(req);
-            }
-            return null;
+            var pathHint = extractUserPath(rawBody);
+            return injectIntoBody(req, buildInjectedText(rawBody, pathHint, null));
         } catch (e) {
             return null;
+        }
+    }
+
+    /* 异步版：含用户路径自动预执行（fetch 拦截用） */
+    function augmentBodyAsync(rawBody) {
+        try {
+            var req = JSON.parse(rawBody);
+            if (!req) return Promise.resolve(null);
+            var pathHint = extractUserPath(rawBody);
+            var prefetchP = pathHint ? __gmCall('fs_list_dir', { path: pathHint }) : Promise.resolve(null);
+            return prefetchP.then(function (pathResult) {
+                return injectIntoBody(req, buildInjectedText(rawBody, pathHint, pathResult));
+            });
+        } catch (e) {
+            return Promise.resolve(null);
         }
     }
 
@@ -416,18 +472,22 @@
         try {
             if (__autoContinueCount >= 5) return;
             __autoContinueCount++;
+            /* ChatGPT 移动版真实输入框是 ProseMirror(contenteditable div)，textarea 是隐藏辅助框（React 不监听） */
+            var pm = document.querySelector('div.ProseMirror[contenteditable="true"], div[role="textbox"][contenteditable="true"]');
             var ta = document.querySelector('textarea');
-            if (!ta) { try { console.log('[MedianGPT++] auto-continue: no textarea'); } catch (e) { /* ignore */ } return; }
-            ta.focus();
-            /* React 可靠输入：优先 execCommand（触发 onChange），其次 native setter + InputEvent */
+            var target = pm || ta;
+            if (!target) { try { console.log('[MedianGPT++] auto-continue: no input element (pm/ta)'); } catch (e) { /* ignore */ } return; }
+            target.focus();
+            /* 注入文本：ProseMirror 用 execCommand（产生真实 input 事件，React 必然感知）；textarea 用 execCommand + setter 兜底 */
             var textInjected = false;
             try {
-                /* 光标移末尾再插入，避免插到中间 */
-                try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* ignore */ }
+                /* 全选已有内容（若有）以便替换，再插入 */
+                try { document.execCommand('selectAll', false, null); } catch (e) { /* ignore */ }
                 document.execCommand('insertText', false, '[median_tool_result_ack]');
-                textInjected = (ta.value.indexOf('[median_tool_result_ack]') >= 0);
+                var checkVal = (pm ? (pm.textContent || '') : ta.value);
+                textInjected = (checkVal.indexOf('[median_tool_result_ack]') >= 0);
             } catch (e) { textInjected = false; }
-            if (!textInjected) {
+            if (!textInjected && ta) {
                 try {
                     var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
                     setter.call(ta, '[median_tool_result_ack]');
@@ -436,16 +496,18 @@
                     if (textInjected) { try { console.log('[MedianGPT++] auto-continue: execCommand failed, used setter fallback'); } catch (e) { /* ignore */ } }
                 } catch (e2) { /* ignore */ }
             }
-            if (!textInjected) { try { console.log('[MedianGPT++] auto-continue: TEXT INJECTION FAILED (value unchanged)'); } catch (e) { /* ignore */ } }
+            if (!textInjected) { try { console.log('[MedianGPT++] auto-continue: TEXT INJECTION FAILED (pm:' + (pm ? (pm.textContent || '').length : -1) + ' ta:' + (ta ? ta.value.length : -1) + ')'); } catch (e) { /* ignore */ } }
+            else if (pm) { try { console.log('[MedianGPT++] auto-continue: text injected into ProseMirror (' + pm.textContent.length + ' chars)'); } catch (e) { /* ignore */ } }
             /* 等待 React 渲染出发送按钮（空输入时不显示） */
             setTimeout(function () {
                 try {
-                    var btn = document.querySelector('button[data-testid="send-button"], button[data-testid="composer-send-button"], button[data-testid="submit-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
+                    var btn = document.querySelector('button[data-testid="send-button"], button[data-testid="composer-send-button"], button[data-testid="submit-button"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[class*="composer-submit-button" i]');
                     if (btn) { btn.click(); try { console.log('[MedianGPT++] auto-continue CLICKED send #' + __autoContinueCount); } catch (e) { /* ignore */ } __verifySend(__autoContinueCount); return; }
-                    /* 兜底：Enter 键发送（带完整按键属性） */
-                    try { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
+                    /* 兜底：Enter 键发送（发到 ProseMirror，带完整按键属性） */
+                    try { target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
+                    try { target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
                     setTimeout(function () {
-                        var btn2 = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="发送" i]');
+                        var btn2 = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[class*="composer-submit-button" i]');
                         if (btn2) { btn2.click(); try { console.log('[MedianGPT++] auto-continue CLICKED send(2) #' + __autoContinueCount); } catch (e) { /* ignore */ } }
                         else { try { console.log('[MedianGPT++] auto-continue: send button STILL not found'); } catch (e) { /* ignore */ } }
                         __verifySend(__autoContinueCount);
@@ -455,14 +517,16 @@
         } catch (e) { /* ignore */ }
     }
 
-    /* 发送后验证：1.5s 后 textarea 应被清空（发送成功的铁证） */
+    /* 发送后验证：1.5s 后输入框应被清空（发送成功的铁证）；ProseMirror 为空或 textarea 为空 */
     function __verifySend(n) {
         setTimeout(function () {
             try {
+                var pm = document.querySelector('div.ProseMirror[contenteditable="true"]');
                 var ta = document.querySelector('textarea');
-                if (!ta) { try { console.log('[MedianGPT++] auto-continue VERIFY #' + n + ': textarea gone'); } catch (e) { /* ignore */ } return; }
-                if (ta.value === '') { try { console.log('[MedianGPT++] auto-continue VERIFIED send #' + n + ' (textarea cleared)'); } catch (e) { /* ignore */ } }
-                else { try { console.log('[MedianGPT++] auto-continue SEND FAILED #' + n + ' (value still: ' + ta.value.slice(0, 30) + ')'); } catch (e) { /* ignore */ } }
+                var pmTxt = pm ? (pm.textContent || '') : '';
+                var taTxt = ta ? ta.value : '';
+                if ((pm && pmTxt === '') || (!pm && taTxt === '')) { try { console.log('[MedianGPT++] auto-continue VERIFIED send #' + n + ' (input cleared)'); } catch (e) { /* ignore */ } }
+                else { try { console.log('[MedianGPT++] auto-continue SEND FAILED #' + n + ' (pm:' + pmTxt.slice(0, 30) + ' ta:' + taTxt.slice(0, 30) + ')'); } catch (e) { /* ignore */ } }
             } catch (e) { /* ignore */ }
         }, 1500);
     }
@@ -516,11 +580,13 @@
                         if (typeof text !== 'string') return origFetch.call(this, input, init);
                         /* 确保工具列表已就绪（GM 预取完成），再注入 */
                         return waitToolsReady().then(function () {
-                            var augmented = augmentBody(text);
-                            /* 无论注入是否成功，都用读取到的完整文本重建 body（ReadableStream 已被消费，不能原样传递） */
-                            init = Object.assign({}, init, { body: augmented !== null ? augmented : text });
-                            var p = origFetch.call(this, input, init);
-                            return p.then(function (r) { return wrapFetchResponse(r); });
+                            /* 异步注入：自动预执行用户指定路径的 fs_list_dir，结果并入本轮 system 消息 */
+                            return augmentBodyAsync(text).then(function (augmented) {
+                                /* 无论注入是否成功，都用读取到的完整文本重建 body（ReadableStream 已被消费，不能原样传递） */
+                                init = Object.assign({}, init, { body: augmented !== null ? augmented : text });
+                                var p = origFetch.call(this, input, init);
+                                return p.then(function (r) { return wrapFetchResponse(r); });
+                            });
                         });
                     });
                 }
