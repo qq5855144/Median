@@ -148,7 +148,11 @@
             + lines.join('\n')
             + '\n[File Workspace] You can read/write files on this Android device. Use median_workspace_info to see the current workspace; write generated content to files with median_write_file (relative path = inside workspace).\n'
             + 'To call a tool, reply with EXACTLY this XML (nothing else):\n'
-            + '<median_tool_call><median_name>INVOCATION_NAME</median_name><median_args>{"arg1":"value1"}</median_args></median_tool_call>\n'
+            + '<median_tool_call><median_name>REAL_TOOL_NAME</median_name><median_args>{"arg1":"value1"}</median_args></median_tool_call>\n'
+            + 'IMPORTANT RULES:\n'
+            + '1. REAL_TOOL_NAME must be one of the ACTUAL tool names listed above (start with median_, github_, browser_ etc). NEVER invent or use placeholder names.\n'
+            + '2. <median_args> must contain ONLY the parameters that tool actually accepts (see description).\n'
+            + '3. Output the XML alone, without markdown code fences or extra text.\n'
             + 'After the tool runs, its result will be sent to you automatically. Then answer the user based on the result.\n';
     }
 
