@@ -889,7 +889,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         org.json.JSONArray rules = McpController.get().rewriteRuleSnapshot();
         if (rules == null || rules.length() == 0) return null;
         final String rulesJson = rules.toString();
-        return "/* Median net_rule rewrite hook */\n(function(){\n"
+        String hook = "/* Median net_rule rewrite hook */\n(function(){\n"
                 + "if(window.__medianReqRewrite)return;window.__medianReqRewrite=true;\n"
                 + "window.__medianReqRewriteStats=window.__medianReqRewriteStats||{};\n"
                 + "var RULES=__RULES__;\n"
@@ -925,7 +925,8 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 + "XMLHttpRequest.prototype.open=function(method,url){this.__mru=url||'';return XO.apply(this,arguments);};"
                 + "XMLHttpRequest.prototype.send=function(body){var ni=apply(this.__mru||'',{method:'POST',body:body});"
                 + "if(ni)return XS.call(this,ni.body);return XS.apply(this,arguments);};\n"
-                + "})();".replace("__RULES__", rulesJson);
+                + "})();";
+        return hook.replace("__RULES__", rulesJson);
     }
 
     private void refreshUserScriptRegistrations(boolean reloadActive) {
