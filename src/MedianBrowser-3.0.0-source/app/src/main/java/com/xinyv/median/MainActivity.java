@@ -357,7 +357,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         cleanTrackingParameters = prefs.getBoolean("clean_tracking_parameters", true);
         if (!MODE_PERFORMANCE.equals(performanceMode) && !MODE_POWER_SAVE.equals(performanceMode)) performanceMode = MODE_STANDARD;
         siteExceptions = new HashSet<String>(prefs.getStringSet("site_exceptions", new HashSet<String>()));
-        scriptStore = new UserScriptStore(this, DeepSeekPP.isEnabled(this) ? buildDsppAssetMap() : null);
+        scriptStore = new UserScriptStore(this, buildScriptAssetMap());
         // 启动时若 DeepSeek++ 已开启，自动用 assets 最新代码重装脚本（幂等）。
         // 根治：升级 APK 后无需手动关→开；prefs 旧数据/损坏数据会被 assets 源码覆盖修复。
         if (DeepSeekPP.isEnabled(this)) {
@@ -3725,7 +3725,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         final boolean enable = !DeepSeekPP.isEnabled(this);
         try {
             if (enable) {
-                if (scriptStore == null) scriptStore = new UserScriptStore(this, buildDsppAssetMap());
+                if (scriptStore == null) scriptStore = new UserScriptStore(this, buildScriptAssetMap());
                 DeepSeekPP.install(this, scriptStore);
             } else {
                 DeepSeekPP.uninstall(scriptStore);
@@ -3738,12 +3738,16 @@ public final class MainActivity extends Activity implements McpController.UiBind
             toast("DeepSeek++ 切换失败：" + (e.getMessage() == null ? e.toString() : e.getMessage()));
         }
     }
-    /** 读取内置 DeepSeek++ 脚本（assets/dspp/），组装 sourceUrl→code 映射。
+    /** 读取内置脚本 assets，组装 sourceUrl→code 映射。
+     * dspp_unlimit.js（解除 DeepSeek 对话长度上限）始终内置；DeepSeek++ 主世界/UI 脚本仅在开关开启时内置。
      * 由 UserScriptStore 加载时用 assets 最新代码覆盖 prefs 旧/损坏数据，彻底绕开大脚本存储故障。 */
-    private Map<String, String> buildDsppAssetMap() {
+    private Map<String, String> buildScriptAssetMap() {
         Map<String, String> map = new HashMap<String, String>();
-        map.put("asset://median/dspp-mainworld", readDsppAsset("dspp/dspp_mainworld.js"));
-        map.put("asset://median/dspp-content", readDsppAsset("dspp/dspp_content.js"));
+        map.put("asset://median/dspp-unlimit", readDsppAsset("dspp/dspp_unlimit.js"));
+        if (DeepSeekPP.isEnabled(this)) {
+            map.put("asset://median/dspp-mainworld", readDsppAsset("dspp/dspp_mainworld.js"));
+            map.put("asset://median/dspp-content", readDsppAsset("dspp/dspp_content.js"));
+        }
         return map;
     }
     private String readDsppAsset(String path) {
@@ -7740,7 +7744,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
         JSONObject out = new JSONObject();
         try {
             out.put("enabled", DeepSeekPP.isEnabled(this));
-            Map<String, String> am = buildDsppAssetMap();
+            Map<String, String> am = buildScriptAssetMap();
             JSONObject assetLens = new JSONObject();
             for (Map.Entry<String, String> e : am.entrySet()) {
                 assetLens.put(e.getKey(), e.getValue() == null ? 0 : e.getValue().length());
