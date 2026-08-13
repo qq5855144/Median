@@ -1,29 +1,28 @@
-// ==UserScript==
-// @name         DeepSeek 解除对话长度上限
-// @namespace    median.dspp-unlimit
-// @version      1.0.0
-// @description  拦截 chat.deepseek.com 的 chat/completion 请求：parent_message_id 置空绕过服务端消息数上限，并把历史会话拼接进 prompt 保持上下文连续（fetch + XHR 双通道）
-// @match        *://chat.deepseek.com/*
-// @run-at       document-start
-// @grant        none
-// ==/UserScript==
 // ============================================================
-// DeepSeek 网页版「解除对话长度上限」注入脚本 v5（fetch+XHR 双通道）
+// DeepSeek 网页版「解除对话长度上限」注入脚本 v6（fetch+XHR 双通道，剥离注入内容）
 // 修复：sid 从 URL 兜底（页面请求体不带 chat_session_id）
 // ============================================================
 (function () {
-  if (window.__dsUnlimit) return;
-  window.__dsUnlimit = true;
+  if (window.__dsUnlimitV6) return;
+  window.__dsUnlimitV6 = true;
   window.__dsDiag = { injectAt: Date.now(), histHookHit: false, completionHookHit: false, xhrCompletionHit: false, urlHits: [] };
   var KEY = 'dsul_hist_';
   var ORIG = window.fetch;
-  var MAX_LEN = 300000;
+  var MAX_LEN = 150000;
   var MAX_ITEMS = 200;
 
   function urlSid() {
     var m = location.pathname.match(/\/s\/([0-9a-f-]+)/);
     return m ? m[1] : '';
   }
+
+  function cleanMsg(p) {
+    var s = String(p || '');
+    s = s.replace(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/g, '');
+    s = s.replace(/\[System: You have access to these local device tools via Median Bridge\][\s\S]*?Then answer the user based on the result\.\s*/g, '');
+    return s.trim();
+  }
+
   function extractSse(txt) {
     var acc = '';
     var re = /data:\s*(\{.*?\})\s*(?:\n|$)/g, m;
@@ -48,7 +47,7 @@
     var sid = String(o.chat_session_id || '');
     if (!sid) sid = urlSid();
     var h = histGet(sid);
-    var msg = o.prompt || '';
+    var msg = cleanMsg(o.prompt || '');
     var nb = Object.assign({}, o, { parent_message_id: null, prompt: buildPrompt(h, msg) });
     h.push({ r: 'u', c: msg });
     histSet(sid, h);
@@ -63,7 +62,7 @@
   }
   function buildPrompt(h, msg) {
     var lines = [];
-    for (var i = 0; i < h.length; i++) lines.push((h[i].r === 'u' ? '[用户] ' : '[助手] ') + h[i].c);
+    for (var i = 0; i < h.length; i++) lines.push((h[i].r === 'u' ? '[用户] ' : '[助手] ') + (h[i].r === 'u' ? cleanMsg(h[i].c) : h[i].c));
     lines.push('[用户] ' + msg);
     var s = lines.join('\n');
     if (s.length > MAX_LEN) s = s.slice(-MAX_LEN);
@@ -130,7 +129,7 @@
               var h = [];
               for (var i = 0; i < msgs.length; i++) {
                 var m = msgs[i];
-                if (m && m.content) h.push({ r: (m.role === 'user' || m.role === 'USER') ? 'u' : 'a', c: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) });
+                if (m && m.content) { var mc = typeof m.content === 'string' ? m.content : JSON.stringify(m.content); if (m.role === 'user' || m.role === 'USER') mc = cleanMsg(mc); h.push({ r: (m.role === 'user' || m.role === 'USER') ? 'u' : 'a', c: mc }); }
               }
               if (h.length) histSet(sid, h);
             }
@@ -146,7 +145,7 @@
       var sid = String(body.chat_session_id || '');
       if (!sid) sid = urlSid();
       var h = histGet(sid);
-      var msg = body.prompt || '';
+      var msg = cleanMsg(body.prompt || '');
       var rewritten = Object.assign({}, body, { parent_message_id: null, prompt: buildPrompt(h, msg) });
       h.push({ r: 'u', c: msg });
       histSet(sid, h);
@@ -206,5 +205,5 @@
     } catch (e) {}
   }, 5000);
 
-  console.log('[DS-Unlimit] v5 注入成功');
+  console.log('[DS-Unlimit] v6 注入成功');
 })();
