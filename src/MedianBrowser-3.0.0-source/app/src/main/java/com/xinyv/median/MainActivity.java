@@ -845,10 +845,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
 
     private void installDocumentStartUserScripts(WebView target) {
         removeDocumentStartUserScripts(target);
-        if (target == null || scriptStore == null || !scriptStore.hasEnabledScripts()) return;
+        // 网络请求改写规则（net_rule type=rewrite）：编译为页面侧 fetch/XHR hook 引擎脚本
+        String rewriteHook = buildRewriteHookScript();
+        if (target == null || scriptStore == null || (!scriptStore.hasEnabledScripts() && rewriteHook == null)) return;
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
         String token = UrlCleaner.randomToken();
         List<String> sources = scriptStore.buildDocumentStartScripts(token);
+        if (rewriteHook != null) sources.add(rewriteHook);
         if (sources.size() == 0) return;
         ArrayList<ScriptHandler> handlers = new ArrayList<ScriptHandler>();
         try {
@@ -873,6 +876,56 @@ public final class MainActivity extends Activity implements McpController.UiBind
         cancelScriptRequests(target);
         scriptBridgeTokens.remove(target);
         documentStartScriptViews.remove(target);
+    }
+
+    /** 编译 net_rule type=rewrite 规则为页面侧 fetch/XHR hook 引擎脚本（document-start 注入）。
+     *  无 rewrite 规则时返回 null。改写配置 target JSON：
+     *    {"match":"URL子串","method":"POST",
+     *     "body":{"set":{"parent_message_id":null},"delete":["x"]},
+     *     "bodyRaw":[{"find":"a","replace":"b"}],
+     *     "headers":{"set":{"X-H":"1"},"delete":["X-F"]}}
+     *  命中统计写入页面变量 window.__medianReqRewriteStats（ruleId->次数）。 */
+    private String buildRewriteHookScript() {
+        org.json.JSONArray rules = McpController.get().rewriteRuleSnapshot();
+        if (rules == null || rules.length() == 0) return null;
+        final String rulesJson = rules.toString();
+        return "/* Median net_rule rewrite hook */\n(function(){\n"
+                + "if(window.__medianReqRewrite)return;window.__medianReqRewrite=true;\n"
+                + "window.__medianReqRewriteStats=window.__medianReqRewriteStats||{};\n"
+                + "var RULES=__RULES__;\n"
+                + "function matchRule(url,method){for(var i=0;i<RULES.length;i++){var r=RULES[i],t=r.target||{},m=t.match,mm=t.method;"
+                + "if(m&&url.indexOf(m)<0)continue;if(mm&&String(method).toUpperCase()!==String(mm).toUpperCase())continue;"
+                + "return {id:r.id,cfg:t};}return null;}\n"
+                + "function rewriteBody(body,cfg){var o=null;try{o=JSON.parse(body);}catch(e){}\n"
+                + "if(o&&cfg.body){var set=cfg.body.set||{},del=cfg.body.delete||[];var ch=false;"
+                + "for(var k in set){if(JSON.stringify(o[k])!==JSON.stringify(set[k])){o[k]=set[k];ch=true;}}"
+                + "for(var i=0;i<del.length;i++){if(del[i] in o){delete o[del[i]];ch=true;}}"
+                + "if(ch)return JSON.stringify(o);}\n"
+                + "if(cfg.bodyRaw&&typeof body==='string'){var s=body,s2=s;"
+                + "for(var j=0;j<cfg.bodyRaw.length;j++){var f=cfg.bodyRaw[j];"
+                + "if(f&&f.find!==undefined)s2=s2.split(String(f.find)).join(f.replace===undefined?'':String(f.replace));}"
+                + "if(s2!==s)return s2;}\n"
+                + "return null;}\n"
+                + "function apply(input,init){var url=(typeof input==='string')?input:((input&&input.url)||'');"
+                + "var method=((init&&init.method)||(input&&input.method)||'GET');"
+                + "var m=matchRule(url,method);if(!m)return null;var nb=null,nh=null;"
+                + "var body=(init&&init.body!==undefined)?init.body:null;"
+                + "if(body!==null&&body!==undefined)nb=rewriteBody(typeof body==='string'?body:JSON.stringify(body),m.cfg);"
+                + "var hdr=(init&&init.headers)||null;"
+                + "if(hdr&&m.cfg.headers){var set=m.cfg.headers.set||{},del=m.cfg.headers.delete||[];var out={},h2=(typeof hdr==='object')?hdr:{};"
+                + "for(var k in h2)out[k]=h2[k];for(var ks in set)out[ks]=String(set[ks]);"
+                + "for(var i=0;i<del.length;i++){for(var kd in out){if(kd.toLowerCase()===String(del[i]).toLowerCase())delete out[kd];}}"
+                + "nh=out;}\n"
+                + "if(nb===null&&nh===null)return null;"
+                + "var ni=Object.assign({},init||{});if(nb!==null)ni.body=nb;if(nh!==null)ni.headers=nh;"
+                + "window.__medianReqRewriteStats[m.id]=(window.__medianReqRewriteStats[m.id]||0)+1;return ni;}\n"
+                + "var ORIG=window.fetch;window.fetch=function(input,init){var ni=apply(input,init);"
+                + "if(ni)return ORIG.call(this,input,ni);return ORIG.apply(this,arguments);};\n"
+                + "var XO=XMLHttpRequest.prototype.open,XS=XMLHttpRequest.prototype.send;"
+                + "XMLHttpRequest.prototype.open=function(method,url){this.__mru=url||'';return XO.apply(this,arguments);};"
+                + "XMLHttpRequest.prototype.send=function(body){var ni=apply(this.__mru||'',{method:'POST',body:body});"
+                + "if(ni)return XS.call(this,ni.body);return XS.apply(this,arguments);};\n"
+                + "})();".replace("__RULES__", rulesJson);
     }
 
     private void refreshUserScriptRegistrations(boolean reloadActive) {

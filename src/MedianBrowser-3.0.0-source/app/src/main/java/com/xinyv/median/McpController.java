@@ -436,14 +436,14 @@ public final class McpController {
         return service.discoverForUi(serverName);
     }
 
-    // ==================== 网络规则引擎（block / redirect / inject / replace） ====================
+    // ==================== 网络规则引擎（block / redirect / inject / replace / rewrite） ====================
     /** 网络拦截/重写/注入规则。 */
     public static final class NetRule {
         public final String id;
-        public final String type;      // block | redirect | inject | replace
+        public final String type;      // block | redirect | inject | replace | rewrite
         public final String pattern;   // URL 子串匹配（不区分大小写）
         public final String match;     // replace: 响应体中的被替换文本（null=用 pattern）
-        public final String target;    // redirect: 目标URL; inject: 注入HTML; replace: 替换后的文本
+        public final String target;    // redirect: 目标URL; inject: 注入HTML; replace: 替换后的文本; rewrite: 改写配置JSON
         public final boolean enabled;
         public volatile long hits;
         public final long createdAt;
@@ -456,14 +456,19 @@ public final class McpController {
     private final List<NetRule> netRules = Collections.synchronizedList(new ArrayList<NetRule>());
     private long netRuleSeq = 0;
 
-    /** 添加网络规则，返回规则 JSON（含 id）。type ∈ block|redirect|inject|replace。 */
+    /** 添加网络规则，返回规则 JSON（含 id）。type ∈ block|redirect|inject|replace|rewrite。 */
     public JSONObject addNetRule(String type, String pattern, String match, String target, boolean enabled) {
         String t = type == null ? "" : type.trim().toLowerCase(java.util.Locale.ROOT);
-        if (!("block".equals(t) || "redirect".equals(t) || "inject".equals(t) || "replace".equals(t)))
+        if (!("block".equals(t) || "redirect".equals(t) || "inject".equals(t) || "replace".equals(t) || "rewrite".equals(t)))
             return null;
         if (pattern == null || pattern.trim().isEmpty()) return null;
-        if (("redirect".equals(t) || "inject".equals(t) || "replace".equals(t)) && target == null)
+        if (("redirect".equals(t) || "inject".equals(t) || "replace".equals(t) || "rewrite".equals(t)) && target == null)
             return null;
+        // rewrite 规则要求 target 为合法 JSON（改写配置）
+        if ("rewrite".equals(t)) {
+            try { new org.json.JSONObject(target); }
+            catch (Exception e) { return null; }
+        }
         String matchTrim = (match == null || match.trim().isEmpty()) ? null : match;
         String id;
         synchronized (netRules) {
@@ -531,6 +536,25 @@ public final class McpController {
             }
         }
         return out;
+    }
+
+    /** 全部启用的 rewrite（请求改写）规则快照：JSONArray of {id, pattern, target(配置JSON), hits}。
+     *  供 MainActivity 编译成页面 fetch/XHR hook 引擎脚本（document-start 注入）。 */
+    public org.json.JSONArray rewriteRuleSnapshot() {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        synchronized (netRules) {
+            for (NetRule r : netRules) {
+                if (!r.enabled || !"rewrite".equals(r.type)) continue;
+                JSONObject o = new JSONObject();
+                try {
+                    o.put("id", r.id).put("pattern", r.pattern)
+                     .put("target", new org.json.JSONObject(r.target))
+                     .put("hits", r.hits);
+                } catch (Exception ignored) {}
+                arr.put(o);
+            }
+        }
+        return arr;
     }
 
     // ==================== 持久 JS 钩子（页面加载后自动注入） ====================

@@ -323,11 +323,11 @@ public final class McpService implements MiniHttpServer.Handler {
         tools.put(tool("browser_console", "读取页面 Console 日志（error/warn/log 等）", schema(null, null)));
         tools.put(tool("browser_network", "读取页面网络请求记录（URL、方法、主框架、时间、状态/响应体快照），body=true 时附带响应体", schema(
                 new JSONObject().put("body", prop("boolean", "true 时返回已捕获的响应体快照（网络规则拉取路径）")), null)));
-        tools.put(tool("net_rule_add", "添加网络规则：block=拦截请求返回空响应; redirect=将请求重写到目标URL; inject=在主框架HTML的</head>前注入片段; replace=替换主框架HTML中的文本", schema(
-                new JSONObject().put("type", prop("string", "block|redirect|inject|replace"))
+        tools.put(tool("net_rule_add", "添加网络规则：block=拦截请求返回空响应; redirect=将请求重写到目标URL; inject=在主框架HTML的</head>前注入片段; replace=替换主框架HTML中的文本; rewrite=页面侧改写请求体/请求头（fetch+XHR双通道 hook 注入）", schema(
+                new JSONObject().put("type", prop("string", "block|redirect|inject|replace|rewrite"))
                         .put("pattern", prop("string", "URL 子串（不区分大小写）"))
                         .put("match", prop("string", "可选，replace 类型专用：响应体中要替换的文本（缺省用 pattern）"))
-                        .put("target", prop("string", "redirect: 目标URL; inject: 注入的HTML/JS片段; replace: 替换后的文本"))
+                        .put("target", prop("string", "redirect: 目标URL; inject: 注入的HTML/JS片段; replace: 替换后的文本; rewrite: 改写配置JSON，形如 {\"match\":\"/api/v0/chat/completion\",\"method\":\"POST\",\"body\":{\"set\":{\"parent_message_id\":null},\"delete\":[\"x\"]},\"bodyRaw\":[{\"find\":\"a\",\"replace\":\"b\"}],\"headers\":{\"set\":{\"X-H\":\"1\"},\"delete\":[\"X-F\"]}}"))
                         .put("enabled", prop("boolean", "是否启用，默认 true")),
                 new String[]{"type", "pattern"})));
         tools.put(tool("net_rule_list", "列出全部网络规则（id/type/pattern/target/enabled/hits 命中次数）", schema(null, null)));
