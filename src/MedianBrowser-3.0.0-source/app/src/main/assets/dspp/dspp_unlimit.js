@@ -56,8 +56,10 @@
     var sid = String(o.chat_session_id || '');
     if (!sid) sid = urlSid();
     var h = histGet(sid);
-    var msg = cleanMsg(o.prompt || '');
-    var nb = Object.assign({}, o, { parent_message_id: null, prompt: buildPrompt(h, msg) });
+    var _rawP = String(o.prompt || '');
+    var _tr = _rawP.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
+    var msg = cleanMsg(_rawP);
+    var nb = Object.assign({}, o, { parent_message_id: null, prompt: (_tr ? _tr[0] : '') + buildPrompt(h, msg) });
     h.push({ r: 'u', c: msg });
     histSet(sid, h);
     window.__dsLastRewrite = { sid: sid, histLen: h.length, body: nb, rawBody: o };
@@ -154,8 +156,10 @@
       var sid = String(body.chat_session_id || '');
       if (!sid) sid = urlSid();
       var h = histGet(sid);
-      var msg = cleanMsg(body.prompt || '');
-      var rewritten = Object.assign({}, body, { parent_message_id: null, prompt: buildPrompt(h, msg) });
+      var _rawP2 = String(body.prompt || '');
+      var _tr2 = _rawP2.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
+      var msg = cleanMsg(_rawP2);
+      var rewritten = Object.assign({}, body, { parent_message_id: null, prompt: (_tr2 ? _tr2[0] : '') + buildPrompt(h, msg) });
       h.push({ r: 'u', c: msg });
       histSet(sid, h);
       window.__dsLastRewrite = { sid: sid, histLen: h.length, body: rewritten, rawBody: body };
