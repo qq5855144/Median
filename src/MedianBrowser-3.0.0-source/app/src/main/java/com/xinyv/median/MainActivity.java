@@ -6046,7 +6046,15 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if (previous != null && previousView != null) {
             updateTabForView(previousView, previousView.getUrl(), previousView.getTitle());
             previous.lastActiveAt = SystemClock.uptimeMillis();
-            previousView.onPause();
+            // 切走旧标签页时不调用 onPause()——它会冻结 WebView 的 JS 事件循环，
+            // 导致页面内 MCP 工具链（dspp_mainworld）的异步 XHR 回调永远不触发、
+            // __toolBusy 永久挂起。改为仅暂停页面内媒体播放；
+            // 渲染由 removeView 停止，省电降级由 applyPerformanceMode(RENDERER_PRIORITY_BOUND) 兜底。
+            try {
+                previousView.evaluateJavascript(
+                    "(function(){try{var _m=document.querySelectorAll('video,audio');for(var i=0;i<_m.length;i++){try{_m[i].pause();}catch(_e){}}}catch(_e2){}})();",
+                    null);
+            } catch (RuntimeException ignored) {}
             if (previousView.getParent() == webContainer) webContainer.removeView(previousView);
         }
 
