@@ -8233,6 +8233,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
         updateAggressivePerformanceResources();
         if (webView != null) {
             webView.onResume();
+            // 工具链恢复：页面 JS 若因后台冻结（系统 freezer/WebView 冻结）错过了
+            // 工具调用解析，回到前台时主动补解析执行（evaluateJavascript 同步执行不受冻结影响）。
+            try {
+                webView.evaluateJavascript(
+                    "try{if(window.__medianLateParse)window.__medianLateParse();}catch(_e){}",
+                    null);
+            } catch (RuntimeException ignored) {}
         }
         scheduleWebViewPrewarm();
         scheduleDeferredStartupWork();
