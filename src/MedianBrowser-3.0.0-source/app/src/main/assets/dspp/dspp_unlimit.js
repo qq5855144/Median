@@ -60,7 +60,7 @@
     var _tr = _rawP.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
     var msg = cleanMsg(_rawP);
     var nb = Object.assign({}, o, { parent_message_id: null, prompt: (_tr ? _tr[0] : '') + buildPrompt(h, msg) });
-    h.push({ r: 'u', c: msg });
+    if (msg && msg.replace(/[\u200b\u200c\u200d\s]/g, '')) h.push({ r: 'u', c: msg });
     histSet(sid, h);
     window.__dsLastRewrite = { sid: sid, histLen: h.length, body: nb, rawBody: o };
     return { sid: sid, body: JSON.stringify(nb), h: h };
@@ -73,8 +73,12 @@
   }
   function buildPrompt(h, msg) {
     var lines = [];
-    for (var i = 0; i < h.length; i++) lines.push((h[i].r === 'u' ? '[用户] ' : '[助手] ') + (h[i].r === 'u' ? cleanMsg(h[i].c) : h[i].c));
-    lines.push('[用户] ' + msg);
+    for (var i = 0; i < h.length; i++) {
+      var cc = String(h[i].c || '');
+      if (!cc.replace(/[\u200b\u200c\u200d\s]/g, '')) continue;
+      lines.push((h[i].r === 'u' ? '[用户] ' : '[助手] ') + (h[i].r === 'u' ? cleanMsg(cc) : cc));
+    }
+    if (msg && msg.replace(/[\u200b\u200c\u200d\s]/g, '')) lines.push('[用户] ' + msg);
     var s = lines.join('\n');
     if (s.length > MAX_LEN) s = s.slice(-MAX_LEN);
     return s;
@@ -160,7 +164,7 @@
       var _tr2 = _rawP2.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
       var msg = cleanMsg(_rawP2);
       var rewritten = Object.assign({}, body, { parent_message_id: null, prompt: (_tr2 ? _tr2[0] : '') + buildPrompt(h, msg) });
-      h.push({ r: 'u', c: msg });
+      if (msg && msg.replace(/[\u200b\u200c\u200d\s]/g, '')) h.push({ r: 'u', c: msg });
       histSet(sid, h);
       window.__dsLastRewrite = { sid: sid, histLen: h.length, body: rewritten, rawBody: body };
       return ORIG.call(this, input, Object.assign({}, init, { body: JSON.stringify(rewritten) })).then(function (resp) {
