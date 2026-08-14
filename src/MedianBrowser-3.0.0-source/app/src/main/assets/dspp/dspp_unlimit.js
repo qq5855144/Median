@@ -27,8 +27,9 @@
 
   function cleanMsg(p) {
     var s = String(p || '');
-    s = s.replace(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/g, '');
-    s = s.replace(/\[System: You have access to these local device tools via Median Bridge\][\s\S]*?Then answer the user based on the result\.\s*/g, '');
+    // v2: 不再剥离 [System: 工具执行结果] 与工具系统提示（由 mainworld 注入，必须透传给模型）
+    // 仅清理零宽字符与多余空白，避免破坏工具结果回传
+    s = s.replace(/[\u200b\u200c\u200d]/g, '');
     return s.trim();
   }
 
