@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         DeepSeek 解除对话长度上限 v6
 // @namespace    median.dspp-unlimit
-// @version      6.0.0
-// @description  解除 DeepSeek 对话长度上限（v6：剥离注入内容，防历史膨胀）
+// @version      6.1.0
+// @description  解除 DeepSeek 对话长度上限（v6：fetch+XHR 双通道；仅清理零宽字符，工具结果透传防历史膨胀）
 // @match        *://chat.deepseek.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 // ============================================================
-// DeepSeek 网页版「解除对话长度上限」注入脚本 v6（fetch+XHR 双通道，剥离注入内容）
+// DeepSeek 网页版「解除对话长度上限」注入脚本 v6（fetch+XHR 双通道，工具结果透传）
 // 修复：sid 从 URL 兜底（页面请求体不带 chat_session_id）
 // ============================================================
 (function () {
