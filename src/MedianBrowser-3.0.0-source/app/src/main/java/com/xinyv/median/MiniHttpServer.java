@@ -227,6 +227,7 @@ public final class MiniHttpServer {
         head.append("Access-Control-Allow-Origin: *\r\n");
         head.append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
         head.append("Access-Control-Allow-Headers: Content-Type, Authorization, X-Median-Token, MCP-Protocol-Version, Mcp-Method, Mcp-Session-Id\r\n");
+        head.append("Access-Control-Allow-Private-Network: true\r\n");
         head.append("Cache-Control: no-store\r\n");
         head.append("\r\n");
         byte[] headBytes = head.toString().getBytes(StandardCharsets.UTF_8);
