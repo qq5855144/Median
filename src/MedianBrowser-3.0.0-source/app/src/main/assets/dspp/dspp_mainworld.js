@@ -544,6 +544,7 @@ window.fetch = function(url, opts) {
                                             } catch (e) {}
                                         }
                                     });
+                                    try {
                                     var _re = /<median_tool_call>([\s\S]*?)<\/median_tool_call>|<median_call>([\s\S]*?)<\/median_call>/g, _m;
                                     while ((_m = _re.exec(f))) {
                                         var _inner = _m[1] || _m[2] || '';
@@ -568,6 +569,7 @@ window.fetch = function(url, opts) {
                                         }
                                     }
                                     f = f.slice(_re.lastIndex);
+                                    } catch (e3) { console.log('[MedianBridge] parse-err', String(e3 && e3.message || e3)); }
                                     pump();
                                 }).catch(function() { try { ctrl.close(); } catch (e) {} });
                             }
