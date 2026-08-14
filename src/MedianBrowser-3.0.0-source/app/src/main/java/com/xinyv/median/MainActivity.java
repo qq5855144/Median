@@ -25,7 +25,6 @@ import android.net.wifi.WifiManager;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -60,7 +59,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -594,7 +592,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         applyChromeTheme();
     }
 
-
     private void installSystemBarInsets(final View target) {
         if (target == null || Build.VERSION.SDK_INT < 30) return;
         target.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
@@ -699,7 +696,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if (url != null) tab.url = url;
         if (title != null && title.length() > 0) tab.title = title;
     }
-
 
     private interface SheetHandler {
         void onItem(int index);
@@ -2110,13 +2106,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }
     }
 
-    /** 兼容包装：拉取并返回 WebResourceResponse。 */
-    private WebResourceResponse fetchRemote(String url) {
-        Fetched f = fetchRemoteBytes(url);
-        if (f == null) return null;
-        return new WebResourceResponse(f.mime, f.charset, new ByteArrayInputStream(f.body));
-    }
-
     /** 对已拉取的响应应用单条变换规则：injectMode 在 </head> 前插入 target；replace 把 match/pattern 替换为 target。
      *  仅对 HTML 生效，其余类型原样返回。 */
     private Fetched applyTransform(Fetched f, McpController.NetRule rule) {
@@ -3449,7 +3438,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         });
     }
 
-
     private void toggleCompatibilityMode(String host, SiteSettingsStore.SiteSettings settings) {
         if (host == null || host.length() == 0 || settings == null) return;
         if (settings.compatibilityMode) {
@@ -4453,11 +4441,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         dialog.show();
     }
 
-    private void showHomeStringChoice(String title, final String key, final String[] values,
-                                      String[] labels, String current) {
-        showHomeStringChoiceInSection(title, key, values, labels, current, HOME_SECTION_MAIN);
-    }
-
     private void showHomeStringChoiceInSection(String title, final String key, final String[] values,
                                       String[] labels, String current, final int returnSection) {
         int checked = 0;
@@ -4471,11 +4454,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         }).setNegativeButton("取消", new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface dialog, int which) { continueHomeSection(returnSection); }
         }).show();
-    }
-
-    private void showHomeIntegerChoice(String title, final String key, final int[] values,
-                                       String[] labels, int current) {
-        showHomeIntegerChoiceInSection(title, key, values, labels, current, HOME_SECTION_MAIN);
     }
 
     private void showHomeIntegerChoiceInSection(String title, final String key, final int[] values,
@@ -4509,10 +4487,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 }).setNegativeButton("取消", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) { continueHomeSection(returnSection); }
                 }).show();
-    }
-
-    private void toggleHomeBoolean(String key, boolean current) {
-        toggleHomeBooleanInSection(key, current, HOME_SECTION_MAIN);
     }
 
     private void toggleHomeBooleanInSection(String key, boolean current, int returnSection) {
@@ -4696,40 +4670,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         catch (RuntimeException error) { toast("无法打开下载中心：" + safeMessage(error)); }
     }
 
-    private String downloadPolicySummary() {
-        ArrayList<String> parts = new ArrayList<String>();
-        if (prefs.getBoolean("download_wifi_only", false)) parts.add("仅非计费网络"); else parts.add("允许移动网络");
-        if (prefs.getBoolean("download_allow_roaming", false)) parts.add("允许漫游");
-        if (prefs.getBoolean("download_charging_only", false)) parts.add("仅充电时");
-        parts.add("Median 单连接下载");
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < parts.size(); i++) { if (i > 0) out.append(" · "); out.append(parts.get(i)); }
-        return out.toString();
-    }
-
-    private void showDownloadPolicy() {
-        final String[] labels = new String[] { "仅在非计费网络下载", "允许数据漫游下载", "仅在充电时下载" };
-        final boolean[] checked = new boolean[] {
-                prefs.getBoolean("download_wifi_only", false),
-                prefs.getBoolean("download_allow_roaming", false),
-                prefs.getBoolean("download_charging_only", false)
-        };
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("下载策略")
-                .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which, boolean isChecked) { checked[which] = isChecked; }
-                })
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        prefs.edit().putBoolean("download_wifi_only", checked[0])
-                                .putBoolean("download_allow_roaming", checked[1])
-                                .putBoolean("download_charging_only", checked[2]).apply();
-                        toast("下载策略已更新");
-                    }
-                }).setNegativeButton("取消", null).create();
-        secureDialog(dialog);
-        dialog.show();
-    }
-
     private String downloadStatusSummary(long id) {
         DownloadStore.Item item = services.downloads().get(id);
         if (item != null && item.isAdaptive()) return adaptiveDownloadStatus(item);
@@ -4764,32 +4704,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         return out.toString();
     }
 
-    private Map<Long, String> downloadStatusSummaries(List<DownloadStore.Item> downloads, int limit) {
-        HashMap<Long, String> result = new HashMap<Long, String>();
-        int count = Math.min(limit, downloads == null ? 0 : downloads.size());
-        if (count == 0) return result;
-        ArrayList<Long> systemIds = new ArrayList<Long>();
-        for (int i = 0; i < count; i++) {
-            DownloadStore.Item item = downloads.get(i);
-            if (item.isAdaptive()) result.put(Long.valueOf(item.id), adaptiveDownloadStatus(item));
-            else systemIds.add(Long.valueOf(item.id));
-        }
-        if (systemIds.size() == 0) return result;
-        long[] ids = new long[systemIds.size()];
-        for (int i = 0; i < systemIds.size(); i++) ids[i] = systemIds.get(i).longValue();
-        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        if (manager == null) return result;
-        Cursor cursor = null;
-        try {
-            cursor = manager.query(new DownloadManager.Query().setFilterById(ids));
-            if (cursor == null) return result;
-            int idColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID);
-            while (cursor.moveToNext()) result.put(Long.valueOf(cursor.getLong(idColumn)), downloadStatusFromCursor(cursor));
-        } catch (Exception ignored) {
-        } finally { if (cursor != null) cursor.close(); }
-        return result;
-    }
-
     private String downloadStatusFromCursor(Cursor cursor) {
         int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
         long current = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
@@ -4799,44 +4713,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if (status == DownloadManager.STATUS_PAUSED) return "已暂停 · " + downloadReason(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)));
         if (status == DownloadManager.STATUS_PENDING) return "等待中";
         return "下载中" + (total > 0 ? " · " + (DownloadCenterPolicy.progressPermille(current, total) / 10) + "%" : "");
-    }
-
-    private void showDownloadActions(final DownloadStore.Item original) {
-        final DownloadStore.Item latest = services.downloads().get(original.id);
-        final DownloadStore.Item item = latest == null ? original : latest;
-        String cancelLabel = item.isAdaptive() ? "取消下载任务" : "移除旧版系统任务";
-        String[] actions = new String[] { "打开文件", "分享文件", "重新下载", "复制下载地址", "计算 SHA-256", "查看详细信息", cancelLabel, "仅忘记 Median 记录" };
-        int[] icons = new int[] { BrowserIconView.PLUS, BrowserIconView.SHARE, BrowserIconView.RELOAD, BrowserIconView.PLUS,
-                BrowserIconView.SHIELD, BrowserIconView.STORAGE, BrowserIconView.CLOSE, BrowserIconView.CLOSE };
-        showActionSheet(item.filename, downloadStatusSummary(item.id), actions, icons, new SheetHandler() {
-            @Override public void onItem(int which) {
-                if (which == 0) openDownloadedFile(item, false);
-                else if (which == 1) openDownloadedFile(item, true);
-                else if (which == 2) enqueueDownloadAdvanced(item.url,
-                        webView == null ? null : webView.getSettings().getUserAgentString(), null,
-                        item.mime, item.filename, downloadContextHeaders(webView, item.url));
-                else if (which == 3) copyText("下载地址", item.url, "下载地址已复制");
-                else if (which == 4) calculateDownloadSha256(item);
-                else if (which == 5) showDownloadDetails(item);
-                else if (which == 6) {
-                    if (item.isAdaptive()) {
-                        Intent cancel = new Intent(MainActivity.this, AdaptiveDownloadService.class);
-                        cancel.setAction(AdaptiveDownloadService.ACTION_CANCEL);
-                        cancel.putExtra(AdaptiveDownloadService.EXTRA_ID, item.id);
-                        try { startService(cancel); } catch (RuntimeException ignored) {}
-                        toast("已请求取消下载");
-                    } else {
-                        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                        if (manager != null) manager.remove(item.id);
-                        services.downloads().remove(item.id);
-                        toast("下载任务与系统记录已移除");
-                    }
-                } else {
-                    services.downloads().remove(item.id);
-                    toast("Median 下载记录已移除");
-                }
-            }
-        });
     }
 
     private void showDownloadDetails(DownloadStore.Item source) {
@@ -5484,10 +5360,6 @@ public final class MainActivity extends Activity implements McpController.UiBind
         } finally {
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private String downloadHttpsText(String sourceUrl, String userAgent, int maxBytes) throws Exception {
-        return new String(downloadHttpsBytes(sourceUrl, userAgent, maxBytes, "下载内容超过大小限制"), "UTF-8");
     }
 
     private byte[] downloadHttpsBytes(String sourceUrl, String userAgent, int maxBytes, String sizeError) throws Exception {

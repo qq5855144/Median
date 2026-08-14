@@ -772,8 +772,6 @@ public final class McpService implements MiniHttpServer.Handler {
             return "{\"error\":\"" + msg.replace("\"", "'").replace("\n", " ") + "\"}";
         }
     }
-    private static JSONObject obj() { return new JSONObject(); }
-    private static JSONArray arr() { return new JSONArray(); }
 
     // ==================== 页面与导航 ====================
 
