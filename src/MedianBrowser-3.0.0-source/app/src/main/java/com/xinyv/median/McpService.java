@@ -809,13 +809,14 @@ public final class McpService implements MiniHttpServer.Handler {
             else break;
         }
         url = cleaned;
-        if (!isHttpUrl(url)) return error("valid http(s) url required");
-        ctl.recordRunLog("info", "panel", "panel_open request url=" + url);
+        final String panelUrl = url;
+        if (!isHttpUrl(panelUrl)) return error("valid http(s) url required");
+        ctl.recordRunLog("info", "panel", "panel_open request url=" + panelUrl);
         try {
             Boolean ok = ctl.onUi(new McpController.BlockingCall<Boolean>() {
                 @Override public Boolean run() {
                     try {
-                        ctl.openBrowserPanel(url);
+                        ctl.openBrowserPanel(panelUrl);
                         return Boolean.TRUE;
                     } catch (Exception e) {
                         ctl.recordRunLog("error", "panel", "panel_open ui error: " + e);
@@ -827,11 +828,11 @@ public final class McpService implements MiniHttpServer.Handler {
                 ctl.recordRunLog("error", "panel", "panel_open failed (ui thread unavailable)");
                 return error("panel start failed");
             }
-            ctl.recordRunLog("info", "panel", "panel_open ok url=" + url);
+            ctl.recordRunLog("info", "panel", "panel_open ok url=" + panelUrl);
             return new JSONObject()
                     .put("ok", true)
                     .put("openedIn", "panel")
-                    .put("url", url)
+                    .put("url", panelUrl)
                     .put("note", "目标页面已在浮动小窗中打开，主窗口不受影响、无遮罩");
         } catch (Exception e) {
             ctl.recordRunLog("error", "panel", "panel_open exception: " + e);
