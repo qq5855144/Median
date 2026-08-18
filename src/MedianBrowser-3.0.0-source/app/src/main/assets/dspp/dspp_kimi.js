@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.5.0
+// @version      1.6.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -232,6 +232,21 @@
     if (!last) { console.log('[KimiBridge] no last req'); if (onFail) onFail(); return; }
     try {
       var b = JSON.parse(JSON.stringify(last.bodyObj));
+      // 关键修复：从当前 URL 提取会话 ID 写入请求体。
+      // 新会话首页发送的首条消息 chat_id 为空（服务端才建会话），且协议层请求
+      // 会被 fetch hook 二次捕获覆盖 lastReq，导致回传结果无会话归属、AI 收不到。
+      var m0 = location.pathname.match(/\/chat\/([^\/?]+)/);
+      var curChat = (m0 && m0[1]) || '';
+      if (curChat) {
+        if ('chat_id' in b) b.chat_id = curChat;
+        else if ('chatId' in b) b.chatId = curChat;
+        else b.chat_id = curChat;
+      } else if (!b.chat_id && !b.chatId) {
+        // 无会话归属可写：协议层回传必然失败，直接走 UI 兜底
+        console.log('[KimiBridge] no chat id available, use UI fallback');
+        if (onFail) onFail();
+        return;
+      }
       var msg = b.message || {};
       var blocks = msg.blocks || [];
       var injected = false;
