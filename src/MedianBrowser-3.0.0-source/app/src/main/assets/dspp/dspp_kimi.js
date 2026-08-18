@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.9.0
-// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力）
+// @version      1.9.1
+// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
 // @grant        none
@@ -237,6 +237,7 @@
   window.__kimiPendingResult = null;
   window.__kimiDoneSigs = []; // [{sig, ts}] 带时间戳，去重仅限短时间窗（跨会话不误伤）
   window.__kimiStreaming = false;
+  window.__kimiStreamTs = 0;
   window.__kimiLastReq = null;
   window.__kimiLastResp = '';
   window.__kimiFailCount = 0;
@@ -595,24 +596,26 @@
 
     if (isChat) {
       window.__kimiStreaming = true;
+      window.__kimiStreamTs = Date.now();
       p.then(function (resp) {
+        var buf = '';
+        var td = new TextDecoder(); // 流式解码器，避免多字节 UTF-8 跨 chunk 被切断
+        var lastLen = 0;
+        function finalize() {
+          window.__kimiStreaming = false;
+          try { window.__kimiLastResp = buf; window.__kimiLiveResp = buf; } catch (e) {}
+          try { handleStreamText(buf); } catch (e) {}
+          setTimeout(function () { if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue(); }, 300);
+        }
         try {
           var cl = resp.clone();
           var reader = cl.body && cl.body.getReader();
-          if (!reader) return;
-          var buf = '';
-          var td = new TextDecoder(); // 流式解码器，避免多字节 UTF-8 跨 chunk 被切断
-          var lastLen = 0;
+          if (!reader) { window.__kimiStreaming = false; return; }
           function pump() {
             return reader.read().then(function (r) {
               if (r.done) {
-                var tail = td.decode();
-                buf += tail;
-                window.__kimiStreaming = false;
-                window.__kimiLastResp = buf;
-                window.__kimiLiveResp = buf;
-                handleStreamText(buf);
-                setTimeout(function () { if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue(); }, 300);
+                try { buf += td.decode(); } catch (e) {}
+                finalize();
                 return;
               }
               buf += td.decode(r.value, { stream: true });
@@ -620,14 +623,33 @@
               // 增量解析：标签一旦完整出现立即执行，不等流结束
               if (buf.length - lastLen >= 64) { lastLen = buf.length; handleStreamText(buf); }
               return pump();
+            }).catch(function (e) {
+              // v1.9.1：流异常终止（网络中断/ResumeChat失败）必须复位 streaming 并续跑，
+              // 否则 __kimiStreaming 卡死导致 autoContinue 永远不触发
+              console.log('[KimiBridge] stream aborted, recover:', String(e && e.message || e));
+              try { buf += td.decode(); } catch (e2) {}
+              finalize();
             });
           }
           pump();
-        } catch (e) {}
+        } catch (e) {
+          console.log('[KimiBridge] resp handler err:', String(e && e.message || e));
+          window.__kimiStreaming = false;
+        }
       }, function () { window.__kimiStreaming = false; });
     }
     return p;
   };
+  // v1.9.1 流看门狗：streaming 卡死超过 90s（无 done/无 abort 回调）强制复位并续跑
+  setInterval(function () {
+    try {
+      if (window.__kimiStreaming && window.__kimiStreamTs && Date.now() - window.__kimiStreamTs > 90000) {
+        console.log('[KimiBridge] stream watchdog: force reset');
+        window.__kimiStreaming = false;
+        if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue();
+      }
+    } catch (e) {}
+  }, 15000);
 
   // ---------- 新标签页打开拦截：改为小窗打开，不脱离对话页 ----------
   // Kimi 前端构造跳转 URL 时可能把工具参数 JSON 结尾（"、}）编码进 URL，如
