@@ -798,6 +798,17 @@ public final class McpService implements MiniHttpServer.Handler {
     /** 小窗打开 URL：应用内浮动面板（无遮罩、可拖动，主窗口保持可见可用）。 */
     private JSONObject panelOpen(JSONObject args) throws Exception {
         String url = args.optString("url", "").trim();
+        // 双保险：清理 Kimi 前端构造跳转 URL 时附加的 JSON 结尾残留（%22=引号，%7D=大括号），否则目标站点 404
+        String cleaned = url;
+        for (int i = 0; i < 8; i++) {
+            if (cleaned.endsWith("%22%7D")) cleaned = cleaned.substring(0, cleaned.length() - 6);
+            else if (cleaned.endsWith("%22")) cleaned = cleaned.substring(0, cleaned.length() - 3);
+            else if (cleaned.endsWith("%7D")) cleaned = cleaned.substring(0, cleaned.length() - 3);
+            else if (cleaned.endsWith("\"}")) cleaned = cleaned.substring(0, cleaned.length() - 2);
+            else if (cleaned.endsWith("\"") || cleaned.endsWith("}")) cleaned = cleaned.substring(0, cleaned.length() - 1);
+            else break;
+        }
+        url = cleaned;
         if (!isHttpUrl(url)) return error("valid http(s) url required");
         ctl.recordRunLog("info", "panel", "panel_open request url=" + url);
         try {

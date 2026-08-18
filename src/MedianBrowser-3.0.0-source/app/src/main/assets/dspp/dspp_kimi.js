@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.8.0
+// @version      1.8.1
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -268,7 +268,7 @@
       var bu = args.url || args.target_url || args.link || args.href || '';
       if (bu && /^https?:\/\//i.test(bu) && !kimiIsChatHost(bu)) {
         full = 'browser_panel_open';
-        args = { url: bu };
+        args = { url: cleanPanelUrl(bu) };
       }
     }
     window.__kimiBusy = true;
@@ -577,15 +577,30 @@
   };
 
   // ---------- 新标签页打开拦截：改为小窗打开，不脱离对话页 ----------
+  // Kimi 前端构造跳转 URL 时可能把工具参数 JSON 结尾（"、}）编码进 URL，如
+  // https://x.com/abc%22%7D —— 目标站点因此 404。这里统一清理尾部残留。
+  function cleanPanelUrl(u) {
+    try {
+      var s = String(u || '');
+      var before = '';
+      for (var i = 0; i < 8; i++) {
+        before = s;
+        s = s.replace(/(%22|%7D|%22%7D|"|})+$/i, '');
+        if (s === before) break;
+      }
+      return s;
+    } catch (e) { return String(u || ''); }
+  }
   window.__kimiPanelOpen = function (url) {
     try {
+      var clean = cleanPanelUrl(url);
       window.__kimiPanelCount = (window.__kimiPanelCount || 0) + 1;
-      console.log('[KimiBridge] panel open', String(url).slice(0, 120));
+      console.log('[KimiBridge] panel open', String(clean).slice(0, 120));
       var x = new XMLHttpRequest();
       x.open('POST', window.__kimiMcuBase(), true);
       x.timeout = 5000;
       x.setRequestHeader('Content-Type', 'application/json');
-      x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: 'browser_panel_open', arguments: { url: String(url) } } }));
+      x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: 'browser_panel_open', arguments: { url: clean } } }));
       return true;
     } catch (e) { return false; }
   };
