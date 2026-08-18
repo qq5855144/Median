@@ -3786,6 +3786,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private Map<String, String> buildScriptAssetMap() {
         Map<String, String> map = new HashMap<String, String>();
         map.put("asset://median/dspp-unlimit", readDsppAsset("dspp/dspp_unlimit.js"));
+        map.put("asset://median/dspp-kimi", readDsppAsset("dspp/dspp_kimi.js"));
         if (DeepSeekPP.isEnabled(this)) {
             String mainworld = readDsppAsset("dspp/dspp_mainworld.js");
             // 把 MCP 端口注入脚本（端口已固定 8788，注入失败时 JS 侧探测兜底）
