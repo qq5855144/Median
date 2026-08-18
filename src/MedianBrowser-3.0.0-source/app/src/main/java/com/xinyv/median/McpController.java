@@ -154,6 +154,12 @@ public final class McpController {
         lanHost = prefs.getBoolean(KEY_LAN, false) ? "0.0.0.0" : "127.0.0.1";
         int preferred = prefs.getInt(KEY_PORT, DEFAULT_PORT);
         if (preferred < 1 || preferred > 65535) preferred = DEFAULT_PORT;
+        // 修复旧版漂移残留：旧 bind 会把漂移端口(8789+)回写 prefs，导致端口越漂越高；
+        // 端口现已固定为 DEFAULT_PORT，历史漂移值一律重置回 8788。
+        if (preferred >= DEFAULT_PORT && preferred < DEFAULT_PORT + 12 && preferred != DEFAULT_PORT) {
+            prefs.edit().putInt(KEY_PORT, DEFAULT_PORT).apply();
+            preferred = DEFAULT_PORT;
+        }
         if (mitm == null) mitm = new MitmProxy(app.getFilesDir());
         mitm.setEnabled(prefs.getBoolean(KEY_PROXY, false));
         if (server != null && service != null && port == preferred) return;
@@ -161,7 +167,6 @@ public final class McpController {
         int bound = bind(preferred, app);
         if (bound > 0) {
             port = bound;
-            if (bound != preferred) prefs.edit().putInt(KEY_PORT, bound).apply();
             // 自动探测远端 MCP 服务器（MTmcp 等可能后启动）：延迟 3s/6s/6s/6s 重试 4 次。
             final McpService svc = service;
             new Thread(new Runnable() {
@@ -179,11 +184,13 @@ public final class McpController {
     }
 
     private int bind(int preferred, Context app) {
-        for (int p = preferred; p < preferred + 12; p++) {
+        // 端口完全固定，绝不漂移。8788 被占用几乎都是旧进程残留(重启瞬间未释放)，
+        // 等待 500ms 重试即可恢复；真正被第三方占用的极端情况保持离线并在日志中提示。
+        for (int attempt = 1; attempt <= 12; attempt++) {
             try {
                 McpService s = new McpService(this, token);
                 final MitmProxy proxy = mitm;
-                MiniHttpServer srv = new MiniHttpServer(lanHost, p, s,
+                MiniHttpServer srv = new MiniHttpServer(lanHost, preferred, s,
                         new MiniHttpServer.ConnectHandler() {
                             @Override public boolean handleConnect(String hostPort, java.net.Socket socket) {
                                 return proxy != null && proxy.isEnabled() && proxy.handleConnect(hostPort, socket);
@@ -192,12 +199,16 @@ public final class McpController {
                 srv.start();
                 service = s;
                 server = srv;
-                recordRunLog("info", "mcp", "MCP server started, port=" + p);
-                return p;
-            } catch (Exception ignored) {
-                // 端口被占用，尝试下一个
+                recordRunLog("info", "mcp", "MCP server started, port=" + preferred);
+                return preferred;
+            } catch (Exception e) {
+                recordRunLog("warn", "mcp", "MCP bind " + preferred + " attempt " + attempt + "/12 failed: " + e.getMessage());
+                if (attempt < 12) {
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return 0; }
+                }
             }
         }
+        recordRunLog("error", "mcp", "MCP bind " + preferred + " failed after 12 attempts, port occupied by other app");
         return 0;
     }
 

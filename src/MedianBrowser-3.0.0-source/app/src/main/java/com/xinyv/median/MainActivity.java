@@ -3788,11 +3788,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
         map.put("asset://median/dspp-unlimit", readDsppAsset("dspp/dspp_unlimit.js"));
         if (DeepSeekPP.isEnabled(this)) {
             String mainworld = readDsppAsset("dspp/dspp_mainworld.js");
-            // 把 MCP 实际端口注入脚本（端口可能因占用漂移 8788..8799，JS 侧以 window.__mcpPort 为首选）
+            // 把 MCP 端口注入脚本（端口已固定 8788，注入失败时 JS 侧探测兜底）
             try {
                 McpController ctl = McpController.get();
                 int p = ctl == null ? 0 : ctl.port();
-                if (p > 0) mainworld = "window.__mcpPort=" + p + ";" + mainworld;
+                if (p <= 0) p = 8788;
+                mainworld = "window.__mcpPort=" + p + ";" + mainworld;
             } catch (Exception ignored) { }
             map.put("asset://median/dspp-mainworld", mainworld);
             map.put("asset://median/dspp-content", readDsppAsset("dspp/dspp_content.js"));
