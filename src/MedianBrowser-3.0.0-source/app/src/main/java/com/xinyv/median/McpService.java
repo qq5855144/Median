@@ -799,19 +799,32 @@ public final class McpService implements MiniHttpServer.Handler {
     private JSONObject panelOpen(JSONObject args) throws Exception {
         String url = args.optString("url", "").trim();
         if (!isHttpUrl(url)) return error("valid http(s) url required");
+        ctl.recordRunLog("info", "panel", "panel_open request url=" + url);
         try {
             android.content.Context ctx = ctl.context();
-            if (ctx == null) return error("app context not ready");
-            android.content.Intent intent = new android.content.Intent(ctx, PanelBrowserActivity.class);
+            if (ctx == null) { ctl.recordRunLog("error", "panel", "panel_open no app context"); return error("app context not ready"); }
+            final android.content.Intent intent = new android.content.Intent(ctx, PanelBrowserActivity.class);
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.putExtra(PanelBrowserActivity.EXTRA_URL, url);
-            ctx.startActivity(intent);
+            // 主线程启动：部分 ROM 从非主线程 startActivity 会被静默丢弃
+            Boolean ok = ctl.onUi(new McpController.BlockingCall<Boolean>() {
+                @Override public Boolean run() {
+                    try { ctx.startActivity(intent); return Boolean.TRUE; }
+                    catch (Exception e) { ctl.recordRunLog("error", "panel", "startActivity error: " + e); return Boolean.FALSE; }
+                }
+            }, 3000);
+            if (ok == null || !ok) {
+                ctl.recordRunLog("error", "panel", "panel_open start failed (ui thread unavailable)");
+                return error("panel start failed");
+            }
+            ctl.recordRunLog("info", "panel", "panel_open started url=" + url);
             return new JSONObject()
                     .put("ok", true)
                     .put("openedIn", "panel")
                     .put("url", url)
                     .put("note", "目标页面已在浮动小窗中打开，当前对话页不受影响");
         } catch (Exception e) {
+            ctl.recordRunLog("error", "panel", "panel_open exception: " + e);
             return error("panel open failed: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
         }
     }

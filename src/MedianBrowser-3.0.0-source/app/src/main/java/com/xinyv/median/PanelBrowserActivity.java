@@ -38,6 +38,7 @@ public final class PanelBrowserActivity extends Activity {
         if (intent != null && intent.getStringExtra(EXTRA_URL) != null) {
             initialUrl = intent.getStringExtra(EXTRA_URL);
         }
+        try { com.xinyv.median.McpController.get().recordRunLog("info", "panel", "PanelActivity onCreate url=" + initialUrl); } catch (Exception ignored) { }
         configureWindow();
         buildUi();
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -182,6 +183,7 @@ public final class PanelBrowserActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try { com.xinyv.median.McpController.get().recordRunLog("info", "panel", "PanelActivity onDestroy url=" + initialUrl); } catch (Exception ignored) { }
         if (webView != null) {
             try {
                 webView.stopLoading();
