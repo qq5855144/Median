@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.4.0
+// @version      1.5.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -185,12 +185,30 @@
   // ---------- 执行队列 + 自动续跑状态 ----------
   window.__kimiBusy = false;
   window.__kimiPendingResult = null;
-  window.__kimiDoneSigs = [];
+  window.__kimiDoneSigs = []; // [{sig, ts}] 带时间戳，去重仅限短时间窗（跨会话不误伤）
   window.__kimiStreaming = false;
   window.__kimiLastReq = null;
   window.__kimiLastResp = '';
   window.__kimiFailCount = 0;
   window.__kimiDiag = { injectedAt: Date.now(), reqs: 0, streams: 0, uiSends: 0, protoSends: 0, capReasons: [] };
+
+  function kimiIsDupSig(sig) {
+    var now = Date.now(), alive = [];
+    for (var i = 0; i < window.__kimiDoneSigs.length; i++) {
+      var it = window.__kimiDoneSigs[i];
+      if (now - it.ts < 60000) {
+        alive.push(it);
+        if (it.sig === sig) { window.__kimiDoneSigs = alive; return true; }
+      }
+    }
+    window.__kimiDoneSigs = alive;
+    return false;
+  }
+  function kimiMarkSig(sig) {
+    window.__kimiDoneSigs.push({ sig: sig, ts: Date.now() });
+  }
+  // 新用户消息到来时清空去重记录（跨会话/跨任务不再误伤相同签名）
+  function kimiResetDup() { window.__kimiDoneSigs = []; }
 
   function toolAndContinue(nm, args) {
     if (window.__kimiBusy) { console.log('[KimiBridge] busy, skip', nm); return; }
@@ -202,7 +220,7 @@
       window.__kimiPendingResult = JSON.stringify(result);
       console.log('[KimiBridge] tool done', full, JSON.stringify(result).slice(0, 200));
       var sig = full + '|' + JSON.stringify(args || {});
-      if (window.__kimiDoneSigs.indexOf(sig) < 0) window.__kimiDoneSigs.push(sig);
+      kimiMarkSig(sig);
       if (result && result.ok === false) window.__kimiFailCount++;
       else window.__kimiFailCount = 0;
       if (window.__kimiFailCount >= 3) { console.log('[KimiBridge] 3 failures, halt'); window.__kimiFailCount = 0; return; }
@@ -340,7 +358,7 @@
       var fullN = resolveTool(c.nm);
       if (!fullN) continue; // 模板标签(如 full_tool_name)或未知工具，跳过
       var sig = fullN + '|' + JSON.stringify(c.args || {});
-      if (window.__kimiDoneSigs.indexOf(sig) >= 0) continue;
+      if (kimiIsDupSig(sig)) continue;
       toolAndContinue(c.nm, c.args);
       break; // 一次只执行一个
     }
@@ -375,6 +393,11 @@
         if (orig !== '' || (blk.text && typeof blk.text.content === 'string') || (c.case === 'text' && c.value)) {
           found = true;
           if (orig.indexOf('[System: 工具执行结果]') < 0 && orig.indexOf('[System: You have access') < 0) {
+            // 真实用户消息：重置去重窗口（跨会话/新任务不误伤相同签名），并清理残留状态
+            if (orig.trim() !== '') {
+              kimiResetDup();
+              window.__kimiFailCount = 0;
+            }
             var inj = '';
             if (window.__kimiPendingResult) {
               inj = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
