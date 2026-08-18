@@ -6022,11 +6022,27 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     view.loadUrl(url);
                     return true;
                 }
+                @Override public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                    recordNetworkRequest(view, url, true, "GET");
+                    return interceptRequest(view, url);
+                }
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     if (request == null) return null;
                     recordNetworkRequest(view, request.getUrl() == null ? "" : request.getUrl().toString(),
                             request.isForMainFrame(), request.getMethod());
                     return interceptRequest(view, request);
+                }
+                @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                    super.onPageStarted(view, url, favicon);
+                    McpController.get().recordRunLog("info", "panel", "page start " + (url == null ? "" : url));
+                }
+                @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    super.onReceivedError(view, request, error);
+                    try {
+                        McpController.get().recordRunLog("error", "panel", "load error " +
+                                (request == null || request.getUrl() == null ? "" : request.getUrl()) + " code=" +
+                                (error == null ? "?" : error.getErrorCode()));
+                    } catch (Exception ignored) { }
                 }
                 @Override public void onPageFinished(WebView view, String url) {
                     try {
