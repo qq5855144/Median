@@ -6022,6 +6022,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
                     view.loadUrl(url);
                     return true;
                 }
+                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    if (request == null) return null;
+                    recordNetworkRequest(view, request.getUrl() == null ? "" : request.getUrl().toString(),
+                            request.isForMainFrame(), request.getMethod());
+                    return interceptRequest(view, request);
+                }
                 @Override public void onPageFinished(WebView view, String url) {
                     try {
                         String t = view.getTitle();
@@ -6043,11 +6049,13 @@ public final class MainActivity extends Activity implements McpController.UiBind
 
             // 右下角缩放把手（隐形触摸区）
             View resizeBR = new View(this);
+            resizeBR.setClickable(true);
             resizeBR.setOnTouchListener(panelResizeListener(true));
             FrameLayout.LayoutParams rlpBR = new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM | Gravity.END);
             browserPanelRoot.addView(resizeBR, rlpBR);
             // 左下角缩放把手（隐形触摸区）
             View resizeBL = new View(this);
+            resizeBL.setClickable(true);
             resizeBL.setOnTouchListener(panelResizeListener(false));
             FrameLayout.LayoutParams rlpBL = new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM | Gravity.START);
             browserPanelRoot.addView(resizeBL, rlpBL);
@@ -6101,6 +6109,21 @@ public final class MainActivity extends Activity implements McpController.UiBind
                         lp.height = Math.min(h2, rootFrame.getHeight() - st[5]);
                     }
                     browserPanelRoot.setLayoutParams(lp);
+                    return true;
+                }
+                if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
+                    // 缩放结束：强制 WebView 重排 viewport，避免内容挤压/错位
+                    if (panelWebView != null) {
+                        panelWebView.post(new Runnable() {
+                            @Override public void run() {
+                                try {
+                                    panelWebView.requestLayout();
+                                    panelWebView.invalidate();
+                                    panelWebView.evaluateJavascript("try{window.dispatchEvent(new Event('resize'))}catch(e){}", null);
+                                } catch (Exception ignored) { }
+                            }
+                        });
+                    }
                     return true;
                 }
                 return true;
