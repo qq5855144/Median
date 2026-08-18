@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.7.0
+// @version      1.8.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -16,6 +16,49 @@
 
   var CHAT_URL_MARK = '/apiv2/kimi.gateway.chat.v1.ChatService/';
   var CHAT_API = 'https://www.kimi.com/apiv2/kimi.gateway.chat.v1.ChatService/Chat';
+
+  // ---------- 导航劫持（v1.8.0）：AI/前端 JS 导航到非 Kimi 域时改走小窗，不脱离对话页 ----------
+  // 场景：Kimi 前端执行 AI 的浏览器工具调用（location.href 赋值 / assign / replace），
+  // 直接把当前对话页导航走。此处拦截跨域导航 → browser_panel_open 小窗打开。
+  function kimiIsChatHost(u) {
+    try {
+      var h = new URL(String(u), location.href).hostname || '';
+      return /(^|\.)(kimi\.com|moonshot\.cn)$/i.test(h);
+    } catch (e) { return false; }
+  }
+  (function installNavGuard() {
+    function guard(url) {
+      try {
+        var s = String(url);
+        if (/^https?:\/\//i.test(s) && !kimiIsChatHost(s) && window.__kimiPanelOpen) {
+          window.__kimiPanelOpen(s);
+          return true; // 已改道小窗，调用方应放弃原导航
+        }
+      } catch (e) {}
+      return false;
+    }
+    try {
+      var d = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href');
+      if (d && d.set) {
+        Object.defineProperty(window.Location.prototype, 'href', {
+          configurable: true,
+          get: d.get,
+          set: function (v) { if (!guard(v)) d.set.call(this, v); }
+        });
+      }
+    } catch (e) {}
+    ['assign', 'replace'].forEach(function (m) {
+      try {
+        var orig = window.Location.prototype[m];
+        if (typeof orig !== 'function') return;
+        window.Location.prototype[m] = function (v) {
+          if (!guard(v)) return orig.apply(this, arguments);
+        };
+      } catch (e) {}
+    });
+    // window.open 已在尾部覆盖；此处记录面板调用计数供诊断
+    window.__kimiPanelCount = 0;
+  })();
 
   // ---------- MCP 连接（8788 固定 + 探测兜底） ----------
   window.__kimiMcu = '';
@@ -77,7 +120,7 @@
      t += '3) On tool error, read the error, fix arguments, retry. ';
      t += '4) Only when the task is COMPLETE output the final answer. ';
      t += '5) When answering ABOUT the tool list, output plain-text names WITHOUT median_name tags (tags ARE executed). ';
-     t += '6) When you need to visit/search a web page, prefer browser_panel_open: it opens the target in a floating mini-window so THIS chat page is never navigated away. Use browser_open/browser_nav ONLY if the task explicitly requires navigating the current tab.';
+      t += '6) To visit/search ANY web page, you MUST use browser_panel_open (opens in a floating mini-window, THIS chat page stays put). NEVER use browser_open/browser_nav for external sites - it navigates THIS conversation away and kills the task. browser_open is ONLY for reloading kimi.com itself. ';
      return t;
    }
 
@@ -176,6 +219,11 @@
         else {
           var _j2 = _rest.match(/\{[\s\S]*?\}/);
           if (_j2) { try { _a2 = JSON.parse(_j2[0]); } catch (e) {} }
+          if (!_a2 || Object.keys(_a2).length === 0) {
+            // 流截断兜底：JSON 不完整但 url 字段已完整时直接提取（AI 常用 browser_open {"url":"..."}）
+            var _um = _rest.match(/"url"\s*:\s*"([^"]+)"/i);
+            if (_um && /^https?:\/\//i.test(_um[1])) _a2 = { url: _um[1] };
+          }
         }
         calls.push({ nm: _nm2, args: _a2 });
       }
@@ -215,6 +263,14 @@
     if (window.__kimiBusy) { console.log('[KimiBridge] busy, skip', nm); return; }
     var full = resolveTool(nm);
     if (!full) { console.log('[KimiBridge] skip unknown tool', nm); return; }
+    // v1.8.0：browser_open/browser_nav 目标是外部站点时一律改走小窗，保护对话页
+    if ((full === 'browser_open' || full === 'browser_nav') && args) {
+      var bu = args.url || args.target_url || args.link || args.href || '';
+      if (bu && /^https?:\/\//i.test(bu) && !kimiIsChatHost(bu)) {
+        full = 'browser_panel_open';
+        args = { url: bu };
+      }
+    }
     window.__kimiBusy = true;
     runTool(full, args).then(function (result) {
       window.__kimiBusy = false;
@@ -384,7 +440,8 @@
   var ORIG_FETCH = window.fetch;
   window.fetch = function (input, init) {
     var url = (typeof input === 'string') ? input : (input && input.url) || '';
-    var isChat = url.indexOf(CHAT_URL_MARK) >= 0;
+    // 只对消息发送端点做注入；GetChat/ListMessages 等是 JSON5 请求体，无需处理
+    var isChat = url.indexOf(CHAT_URL_MARK) >= 0 && /\/Chat([?#]|$)/.test(url);
     if (isChat) { try { window.__kimiDiag.reqs++; } catch (e) {} }
 
     function headersToObj(h) {
@@ -522,6 +579,8 @@
   // ---------- 新标签页打开拦截：改为小窗打开，不脱离对话页 ----------
   window.__kimiPanelOpen = function (url) {
     try {
+      window.__kimiPanelCount = (window.__kimiPanelCount || 0) + 1;
+      console.log('[KimiBridge] panel open', String(url).slice(0, 120));
       var x = new XMLHttpRequest();
       x.open('POST', window.__kimiMcuBase(), true);
       x.timeout = 5000;
