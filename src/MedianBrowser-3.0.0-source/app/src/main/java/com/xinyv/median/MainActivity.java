@@ -3787,7 +3787,14 @@ public final class MainActivity extends Activity implements McpController.UiBind
         Map<String, String> map = new HashMap<String, String>();
         map.put("asset://median/dspp-unlimit", readDsppAsset("dspp/dspp_unlimit.js"));
         if (DeepSeekPP.isEnabled(this)) {
-            map.put("asset://median/dspp-mainworld", readDsppAsset("dspp/dspp_mainworld.js"));
+            String mainworld = readDsppAsset("dspp/dspp_mainworld.js");
+            // 把 MCP 实际端口注入脚本（端口可能因占用漂移 8788..8799，JS 侧以 window.__mcpPort 为首选）
+            try {
+                McpController ctl = McpController.get();
+                int p = ctl == null ? 0 : ctl.port();
+                if (p > 0) mainworld = "window.__mcpPort=" + p + ";" + mainworld;
+            } catch (Exception ignored) { }
+            map.put("asset://median/dspp-mainworld", mainworld);
             map.put("asset://median/dspp-content", readDsppAsset("dspp/dspp_content.js"));
         }
         return map;
