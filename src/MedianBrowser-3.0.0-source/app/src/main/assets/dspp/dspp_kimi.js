@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.2.0
+// @version      1.4.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -85,6 +85,8 @@
     if (!nm || typeof nm !== 'string') return null;
     nm = nm.trim().replace(/^remote\.mtmcp\./i, 'remote.mt_mcp.').replace(/^remote\.mtmcp:/i, 'remote.mt_mcp:').replace(/^mtmcp\./i, 'mt_mcp.');
     if (!nm) return null;
+    // 空格/连字符归一化（MCP 返回名可能含空格如 "remote.MT MCP.mt_apk_*"，AI 可能改写为 MT_MCP/MT-MCP 等）
+    var nmSquash = nm.toLowerCase().replace(/[\s-]+/g, '_').replace(/_+/g, '_');
     var nmLow = nm.toLowerCase(), best = null;
     try {
       var rt = fetchRemoteTools();
@@ -94,6 +96,8 @@
         if (rn === nm) return rn;
         var rnLow = rn.toLowerCase();
         if (rnLow === nmLow) return rn;
+        var rnSquash = rnLow.replace(/[\s-]+/g, '_').replace(/_+/g, '_');
+        if (rnSquash === nmSquash) return rn;
         var st1 = rnLow.replace(/^remote\.[^.]+(\.|$)/, '').replace(/^remote[:.]/, '');
         if (st1 === nmLow) return rn;
         if (rnLow.length > nmLow.length && rnLow.lastIndexOf(nmLow) === rnLow.length - nmLow.length &&
@@ -310,16 +314,32 @@
     else fallback();
   }
 
-  // ---------- 流文本处理（增量防重复解析） ----------
+  // ---------- 流文本处理（从二进制事件流提取纯文本，增量防重复解析） ----------
+  // Kimi 流式响应是 connect-RPC 二进制 envelope：文本被拆成 {"op":"append","mask":"block.text.content",...,"text":{"content":"片段"}} 事件，
+  // 标签文本跨事件不连续，必须先从事件流中提取并拼接 text.content/think.content 片段，再做标签解析。
+  function extractStreamText(buf) {
+    var out = [];
+    var re = /"(?:text|think)"\s*:\s*\{\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g, m;
+    while ((m = re.exec(buf))) {
+      var v = m[1];
+      try { v = JSON.parse('"' + v + '"'); } catch (e) {}
+      if (v) out.push(v);
+    }
+    return out.join('');
+  }
   var __kimiParsedUpTo = 0;
   function handleStreamText(buf) {
     if (!buf) return;
-    var calls = parseToolCalls(buf);
+    var txt = extractStreamText(buf);
+    var calls = parseToolCalls(txt);
+    if (!calls.length) calls = parseToolCalls(buf); // 兜底：兼容纯文本流
     if (!calls.length) return;
-    // 只执行新出现的调用
+    // 只执行新出现的调用（resolveTool 失败时跳过，继续找下一个真实调用）
     for (var i = 0; i < calls.length; i++) {
       var c = calls[i];
-      var sig = (resolveTool(c.nm) || c.nm) + '|' + JSON.stringify(c.args || {});
+      var fullN = resolveTool(c.nm);
+      if (!fullN) continue; // 模板标签(如 full_tool_name)或未知工具，跳过
+      var sig = fullN + '|' + JSON.stringify(c.args || {});
       if (window.__kimiDoneSigs.indexOf(sig) >= 0) continue;
       toolAndContinue(c.nm, c.args);
       break; // 一次只执行一个
@@ -432,17 +452,24 @@
           var reader = cl.body && cl.body.getReader();
           if (!reader) return;
           var buf = '';
+          var td = new TextDecoder(); // 流式解码器，避免多字节 UTF-8 跨 chunk 被切断
+          var lastLen = 0;
           function pump() {
             return reader.read().then(function (r) {
               if (r.done) {
+                var tail = td.decode();
+                buf += tail;
                 window.__kimiStreaming = false;
                 window.__kimiLastResp = buf;
+                window.__kimiLiveResp = buf;
                 handleStreamText(buf);
                 setTimeout(function () { if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue(); }, 300);
                 return;
               }
-              buf += new TextDecoder().decode(r.value);
+              buf += td.decode(r.value, { stream: true });
               window.__kimiLiveResp = buf;
+              // 增量解析：标签一旦完整出现立即执行，不等流结束
+              if (buf.length - lastLen >= 64) { lastLen = buf.length; handleStreamText(buf); }
               return pump();
             });
           }
