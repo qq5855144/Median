@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.9.6
+// @version      1.9.7
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -413,7 +413,7 @@ t += '[任务推进规则 - 必须严格遵守] 1) 单次行动单元：每一�
     if (!window.__kimiPendingResult) return;
     if (window.__kimiStreaming) return;
     var txt = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
-      '\n[结果结束。请基于该工具结果回答用户之前的问题并继续任务：需要时请再次调用工具（允许与上次相同，用于继续读取/修改/重试），每次只发一个调用并等待结果；任务完成后直接回答用户。]';
+      '\n[结果结束。继续任务。]';
     var pending = window.__kimiPendingResult;
     window.__kimiPendingResult = null;
     var fallback = function () {
@@ -555,10 +555,14 @@ t += '[任务推进规则 - 必须严格遵守] 1) 单次行动单元：每一�
             var inj = '';
             if (window.__kimiPendingResult) {
               inj = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
-                '\n[结果结束。请基于该工具结果回答用户之前的问题并继续任务：需要时请再次调用工具（允许与上次相同，用于继续读取/修改/重试），每次只发一个调用并等待结果；任务完成后直接回答用户。]\n';
+                '\n[结果结束。继续任务。]\n';
               window.__kimiPendingResult = null;
             }
-            var newTxt = inj + toolSysPrompt() + orig;
+            // 规则分级注入：完整规则仅会话首轮注入，后续回传零重复（避免冗长说教干扰模型智能）
+            var chatId = (bodyObj && (bodyObj.chatId || bodyObj.chat_id)) || '';
+            var needRules = !window.__kimiSysChat || window.__kimiSysChat !== chatId;
+            if (needRules) window.__kimiSysChat = chatId;
+            var newTxt = inj + (needRules ? toolSysPrompt() : '') + orig;
             if (c.case === 'text' && c.value) c.value.content = newTxt;
             else blk.text.content = newTxt;
           }

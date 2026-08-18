@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DeepSeek 解除对话长度上限 v6
 // @namespace    median.dspp-unlimit
-// @version      6.1.0
+// @version      6.1.1
 // @description  解除 DeepSeek 对话长度上限（v6：fetch+XHR 双通道；仅清理零宽字符，工具结果透传防历史膨胀）
 // @match        *://chat.deepseek.com/*
 // @run-at       document-start
@@ -58,7 +58,7 @@
     if (!sid) sid = urlSid();
     var h = histGet(sid);
     var _rawP = String(o.prompt || '');
-    var _tr = _rawP.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
+    var _tr = _rawP.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。继续任务。\]\s*/);
     var msg = cleanMsg(_rawP);
     var nb = Object.assign({}, o, { parent_message_id: null, prompt: (_tr ? _tr[0] : '') + buildPrompt(h, msg) });
     if (msg && msg.replace(/[\u200b\u200c\u200d\s]/g, '')) h.push({ r: 'u', c: msg });
@@ -162,7 +162,7 @@
       if (!sid) sid = urlSid();
       var h = histGet(sid);
       var _rawP2 = String(body.prompt || '');
-      var _tr2 = _rawP2.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。请基于该工具结果回答用户之前的问题，不要重复调用相同工具。\]\s*/);
+      var _tr2 = _rawP2.match(/\[System: 工具执行结果\][\s\S]*?\[结果结束。继续任务。\]\s*/);
       var msg = cleanMsg(_rawP2);
       var rewritten = Object.assign({}, body, { parent_message_id: null, prompt: (_tr2 ? _tr2[0] : '') + buildPrompt(h, msg) });
       if (msg && msg.replace(/[\u200b\u200c\u200d\s]/g, '')) h.push({ r: 'u', c: msg });
