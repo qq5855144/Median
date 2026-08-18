@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.9.9
+// @version      1.10.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -113,9 +113,9 @@
     var t = '[System: You have access to these local device tools via Median Bridge]\n';
     t += rt.map(function (x) { return '- ' + x.name + ': ' + x.description; }).join('\n');
     t += '\n[TOOL PROTOCOL] To call a tool, output EXACTLY this XML at the END of your message:\n';
-    t += '<median_name>full_tool_name</median_name> {"arg":"value"}\n';
-     t += 'The <median_name> tag MUST contain the FULL exact tool name from the list above (including remote.xxx. prefix). ';
-      t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. NEVER output a second tool call in the same message, NEVER assume or guess the result before it arrives. After the result arrives, you MUST FIRST analyze the result, THEN review the current task progress and plan the next action based on that progress, and ONLY after completing this analysis and planning may you take the next step. Taking any next action before the result is returned and analyzed is STRICTLY FORBIDDEN. ';
+    t += (rt.length ? '<median_name>' + rt[0].name + '</median_name> {"arg":"value"}\n' : '<median_name>full_tool_name</median_name> {"arg":"value"}\n');
+     t += 'The <median_name> tag MUST contain the FULL exact tool name from the list above (including remote.xxx. prefix). NEVER output the literal placeholder "full_tool_name" and NEVER copy the example above blindly - always copy the EXACT tool name from the list that matches your intent, and replace {"arg":"value"} with the REAL JSON arguments that tool requires. ';
+      t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. NEVER output a second tool call in the same message, NEVER assume or guess the result before it arrives. After the result arrives, you MUST FIRST analyze the result, THEN review the current task progress and plan the next action based on that progress, and ONLY after completing this analysis and planning may you take the next step. Taking any next action before the result is returned and analyzed is STRICTLY FORBIDDEN. NEVER write intent text like "I need to call a tool" or "让我调用工具" without actually outputting the <median_name> tag - such text is NOT a tool call and wastes turns. When you have decided what to call, output the tag DIRECTLY as the END of your message, nothing else. ';
      t += '2) After a result arrives you MAY call any tool again to continue, unlimited times. ';
      t += '3) On tool error, read the error, fix arguments, retry. ';
      t += '4) Only when the task is COMPLETE output the final answer. ';
