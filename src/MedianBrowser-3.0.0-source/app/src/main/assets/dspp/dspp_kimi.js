@@ -453,5 +453,7 @@
     return p;
   };
 
-  console.log('[KimiBridge] injected, mcu=' + window.__kimiMcuBase());
+  // 注：MCP 探测（同步 XHR）延迟执行，避免拖慢 document-start 计时窗口导致脚本被隔离
+  setTimeout(function () { try { window.__kimiMcuBase(); } catch (e) {} }, 1500);
+  console.log('[KimiBridge] injected at document-start');
 })();

@@ -438,6 +438,7 @@ final class UserScriptStore {
                 if (item == null) continue;
                 Script script = getById(item.optString("id", ""));
                 if (script == null) continue;
+                if (script.sourceUrl != null && script.sourceUrl.startsWith("asset://median/")) continue;
                 double ms = item.optDouble("ms", 0d);
                 String error = item.optString("error", "");
                 script.lastCostMs = ms;
@@ -463,6 +464,7 @@ final class UserScriptStore {
     synchronized void recordExecution(String scriptId, double ms, String error) {
         Script script = getById(scriptId);
         if (script == null) return;
+        if (script.sourceUrl != null && script.sourceUrl.startsWith("asset://median/")) return;
         ms = Math.max(0d, Math.min(60000d, ms));
         error = error == null ? "" : error;
         script.lastCostMs = ms;
@@ -559,12 +561,16 @@ final class UserScriptStore {
                     for (int i = 0; i < cache.size(); i++) {
                         if (cache.get(i).id.equals(builtin.id)) {
                             builtin.enabled = cache.get(i).enabled || builtin.enabled;
-                            builtin.quarantined = cache.get(i).quarantined;
                             cache.set(i, builtin);
                             replaced = true;
                             break;
                         }
                     }
+                    // 内置 assets 脚本为第一方可信代码：不受慢执行看门狗隔离，
+                    // 修复升级后历史 quarantine 状态残留导致内置脚本永远不注入的问题。
+                    builtin.quarantined = false;
+                    builtin.slowStrikes = 0;
+                    builtin.disabledReason = "";
                     if (!replaced && cache.size() < 128) cache.add(builtin);
                 } catch (Exception ignored) {
                 }
