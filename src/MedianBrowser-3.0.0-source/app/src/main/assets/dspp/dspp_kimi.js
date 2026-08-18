@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.0.0
+// @version      1.1.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -186,7 +186,7 @@
   window.__kimiLastReq = null;
   window.__kimiLastResp = '';
   window.__kimiFailCount = 0;
-  window.__kimiDiag = { injectedAt: Date.now(), reqs: 0, streams: 0, uiSends: 0, protoSends: 0 };
+  window.__kimiDiag = { injectedAt: Date.now(), reqs: 0, streams: 0, uiSends: 0, protoSends: 0, capReasons: [] };
 
   function toolAndContinue(nm, args) {
     if (window.__kimiBusy) { console.log('[KimiBridge] busy, skip', nm); return; }
@@ -230,10 +230,22 @@
         msg.blocks = blocks;
       }
       window.__kimiStreaming = true;
+      window.__kimiDiag.protoSends++;
+      var body;
+      if (last.isBinary) {
+        var payload2 = new TextEncoder().encode(JSON.stringify(b));
+        body = new Uint8Array(5 + payload2.length);
+        body[0] = last.flagsByte || 0;
+        body[1] = (payload2.length >> 24) & 255; body[2] = (payload2.length >> 16) & 255;
+        body[3] = (payload2.length >> 8) & 255; body[4] = payload2.length & 255;
+        body.set(payload2, 5);
+      } else {
+        body = JSON.stringify(b);
+      }
       fetch(last.url, {
         method: 'POST',
         headers: last.headers || {},
-        body: JSON.stringify(b),
+        body: body,
         credentials: 'include'
       }).then(function (resp) {
         if (!resp || !resp.ok) { window.__kimiStreaming = false; console.log('[KimiBridge] proto bad resp', resp && resp.status); if (onFail) onFail(); }
@@ -324,38 +336,85 @@
     var isChat = url.indexOf(CHAT_URL_MARK) >= 0;
     if (isChat) { try { window.__kimiDiag.reqs++; } catch (e) {} }
 
-    if (isChat && init) {
+    function headersToObj(h) {
+      var o = {};
+      if (!h) return o;
       try {
-        if (typeof init.body === 'string') {
-          var bodyObj = JSON.parse(init.body);
-          var msg = bodyObj && bodyObj.message;
-          if (msg && Array.isArray(msg.blocks)) {
-            for (var i = 0; i < msg.blocks.length; i++) {
-              var blk = msg.blocks[i] || {};
-              var c = blk.content || {};
-              if (c.case === 'text' && c.value) {
-                var orig = c.value.content || '';
-                if (orig.indexOf('[System: 工具执行结果]') < 0 && orig.indexOf('[System: You have access') < 0) {
-                  var inj = '';
-                  if (window.__kimiPendingResult) {
-                    inj = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
-                      '\n[结果结束。请基于该工具结果回答用户之前的问题并继续任务：需要时请再次调用工具（允许与上次相同，用于继续读取/修改/重试），每次只发一个调用并等待结果；任务完成后直接回答用户。]\n';
-                    window.__kimiPendingResult = null;
-                  }
-                  c.value.content = inj + toolSysPrompt() + orig;
-                }
-                break;
-              }
+        if (typeof h.forEach === 'function') { h.forEach(function (v, k) { o[k] = v; }); return o; }
+        if (typeof h === 'object') { for (var kk in h) { if (Object.prototype.hasOwnProperty.call(h, kk)) o[kk] = h[kk]; } }
+      } catch (e) {}
+      return o;
+    }
+    function injectBlocks(bodyObj) {
+      var msg = bodyObj && bodyObj.message;
+      if (!msg || !Array.isArray(msg.blocks)) { window.__kimiDiag.capReasons.push('no-blocks'); return false; }
+      var found = false;
+      for (var i = 0; i < msg.blocks.length; i++) {
+        var blk = msg.blocks[i] || {};
+        var c = blk.content || {};
+        if (c.case === 'text' && c.value) {
+          found = true;
+          var orig = c.value.content || '';
+          if (orig.indexOf('[System: 工具执行结果]') < 0 && orig.indexOf('[System: You have access') < 0) {
+            var inj = '';
+            if (window.__kimiPendingResult) {
+              inj = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
+                '\n[结果结束。请基于该工具结果回答用户之前的问题并继续任务：需要时请再次调用工具（允许与上次相同，用于继续读取/修改/重试），每次只发一个调用并等待结果；任务完成后直接回答用户。]\n';
+              window.__kimiPendingResult = null;
             }
-            init.body = JSON.stringify(bodyObj);
+            c.value.content = inj + toolSysPrompt() + orig;
+          }
+          break;
+        }
+      }
+      if (!found) { window.__kimiDiag.capReasons.push('no-text-block'); return false; }
+      return true;
+    }
+
+    if (isChat && init) {
+      var capOk = false;
+      if (!init.body) { window.__kimiDiag.capReasons.push('no-body'); }
+      else {
+        try {
+          var bodyObj = null, bodyIsBinary = false, flagsByte = 0;
+          if (typeof init.body === 'string') {
+            bodyObj = JSON.parse(init.body);
+          } else if (init.body instanceof Uint8Array) {
+            bodyIsBinary = true; flagsByte = init.body[0];
+            bodyObj = JSON.parse(new TextDecoder().decode(init.body.subarray(5)));
+          } else if (init.body instanceof ArrayBuffer) {
+            bodyIsBinary = true; var u8b = new Uint8Array(init.body); flagsByte = u8b[0];
+            bodyObj = JSON.parse(new TextDecoder().decode(u8b.subarray(5)));
+          } else {
+            window.__kimiDiag.capReasons.push('body-type:' + Object.prototype.toString.call(init.body));
+          }
+          if (bodyObj && injectBlocks(bodyObj)) {
+            if (bodyIsBinary) {
+              var payload = new TextEncoder().encode(JSON.stringify(bodyObj));
+              var nb = new Uint8Array(5 + payload.length);
+              nb[0] = flagsByte;
+              nb[1] = (payload.length >> 24) & 255; nb[2] = (payload.length >> 16) & 255;
+              nb[3] = (payload.length >> 8) & 255; nb[4] = payload.length & 255;
+              nb.set(payload, 5);
+              init.body = nb;
+            } else {
+              init.body = JSON.stringify(bodyObj);
+            }
             window.__kimiLastReq = {
               url: url,
-              headers: (init.headers) ? JSON.parse(JSON.stringify(init.headers)) : {},
-              bodyObj: JSON.parse(JSON.stringify(bodyObj))
+              headers: headersToObj(init.headers),
+              bodyObj: JSON.parse(JSON.stringify(bodyObj)),
+              isBinary: bodyIsBinary,
+              flagsByte: flagsByte
             };
+            window.__kimiLastReqTs = Date.now();
+            capOk = true;
           }
+        } catch (e) {
+          window.__kimiDiag.capReasons.push('err:' + String(e && e.message || e));
         }
-      } catch (e) { console.log('[KimiBridge] req inject err', String(e && e.message || e)); }
+      }
+      if (!capOk) console.log('[KimiBridge] capture skip', url.slice(-40), window.__kimiDiag.capReasons.slice(-2));
     }
 
     var p = ORIG_FETCH.apply(this, arguments);
