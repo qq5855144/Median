@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.1.0
+// @version      1.2.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -216,16 +216,13 @@
       for (var i = 0; i < blocks.length; i++) {
         var blk = blocks[i] || {};
         var c = blk.content || {};
-        if (c.case === 'text' && c.value) {
-          c.value.content = text;
-          injected = true;
-          break;
-        }
+        if (c.case === 'text' && c.value) { c.value.content = text; injected = true; break; }
+        if (blk.text && typeof blk.text.content === 'string') { blk.text.content = text; injected = true; break; }
       }
       if (!injected) {
         blocks.unshift({
-          $typeName: 'kimi.chat.v1.Block', id: '', parentId: null, messageId: '',
-          content: { case: 'text', value: { $typeName: 'kimi.chat.v1.TextBlock', content: text } }
+          $typeName: 'kimi.chat.v1.Block', id: '', messageId: '',
+          text: { $typeName: 'kimi.chat.v1.TextBlock', content: text }
         });
         msg.blocks = blocks;
       }
@@ -352,9 +349,11 @@
       for (var i = 0; i < msg.blocks.length; i++) {
         var blk = msg.blocks[i] || {};
         var c = blk.content || {};
-        if (c.case === 'text' && c.value) {
+        var orig = '';
+        if (c.case === 'text' && c.value) { orig = c.value.content || ''; }
+        else if (blk.text && typeof blk.text.content === 'string') { orig = blk.text.content; }
+        if (orig !== '' || (blk.text && typeof blk.text.content === 'string') || (c.case === 'text' && c.value)) {
           found = true;
-          var orig = c.value.content || '';
           if (orig.indexOf('[System: 工具执行结果]') < 0 && orig.indexOf('[System: You have access') < 0) {
             var inj = '';
             if (window.__kimiPendingResult) {
@@ -362,12 +361,18 @@
                 '\n[结果结束。请基于该工具结果回答用户之前的问题并继续任务：需要时请再次调用工具（允许与上次相同，用于继续读取/修改/重试），每次只发一个调用并等待结果；任务完成后直接回答用户。]\n';
               window.__kimiPendingResult = null;
             }
-            c.value.content = inj + toolSysPrompt() + orig;
+            var newTxt = inj + toolSysPrompt() + orig;
+            if (c.case === 'text' && c.value) c.value.content = newTxt;
+            else blk.text.content = newTxt;
           }
           break;
         }
       }
-      if (!found) { window.__kimiDiag.capReasons.push('no-text-block'); return false; }
+      if (!found) {
+        window.__kimiDiag.capReasons.push('no-text-block');
+        try { window.__kimiDiag.lastNoTextBody = JSON.stringify(bodyObj).substring(0, 300); } catch (e) {}
+        return false;
+      }
       return true;
     }
 
