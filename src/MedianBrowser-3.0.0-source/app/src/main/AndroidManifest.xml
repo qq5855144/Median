@@ -61,14 +61,6 @@
             android:screenOrientation="unspecified" />
 
         <activity
-            android:name=".PanelBrowserActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleTop"
-            android:screenOrientation="unspecified"
-            android:theme="@style/PanelTheme" />
-
-        <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
             android:exported="true"

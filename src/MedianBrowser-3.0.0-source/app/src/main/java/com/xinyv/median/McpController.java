@@ -64,6 +64,7 @@ public final class McpController {
         void addBookmark(String url, String title);    // 添加书签（已存在则忽略）
         void clearHistory();         // 清空浏览历史
         JSONObject dsppDiagnostics();  // DeepSeek++ 运行时诊断（开关/脚本缓存/内置资产读取）
+        void openBrowserPanel(String url);  // 应用内浮动小窗打开 URL（无遮罩、可拖动、不丢失主窗口）
     }
 
     private static volatile McpController instance;
@@ -109,6 +110,11 @@ public final class McpController {
     public void switchTab(int index) { if (bindings != null) bindings.switchTab(index); }
     public void showHome() { if (bindings != null) bindings.showHome(); }
     public JSONObject settingsSnapshot() { return bindings == null ? null : bindings.settingsSnapshot(); }
+    /** 应用内浮动小窗打开 URL（须在主线程调用）。 */
+    public void openBrowserPanel(String url) {
+        if (bindings == null) return;
+        bindings.openBrowserPanel(url);
+    }
     public String applySetting(final String key, final String value) {
         if (bindings == null) return "mcp not attached";
         final String[] err = new String[1];

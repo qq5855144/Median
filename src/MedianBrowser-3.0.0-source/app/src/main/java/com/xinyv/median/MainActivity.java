@@ -17,6 +17,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.util.DisplayMetrics;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.net.ConnectivityManager;
@@ -152,6 +153,12 @@ public final class MainActivity extends Activity implements McpController.UiBind
     private static final int BLUE = Color.rgb(26, 115, 232);
 
     private FrameLayout rootFrame;
+    // ===== AI 小窗浏览：应用内浮动面板（无遮罩、可拖动、主窗口不丢失） =====
+    private FrameLayout browserPanelRoot;
+    private WebView panelWebView;
+    private TextView panelTitleView;
+    private boolean panelExpanded;
+    private int panelDragLastX, panelDragLastY;
     // ===== P0: AI 工具调用可视化面板 + 长任务通知 =====
     private View toolPanelView;
     private LinearLayout toolPanelList;
@@ -5894,6 +5901,189 @@ public final class MainActivity extends Activity implements McpController.UiBind
         if (!exists) dataStore.toggleBookmark(t, url);
     }
     @Override public void clearHistory() { dataStore.clearHistory(); }
+    // ==================== AI 小窗浏览（应用内浮动面板，无遮罩不丢大窗口） ====================
+    @Override public void openBrowserPanel(final String url) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() { showBrowserPanel(url); }
+        });
+    }
+    private void showBrowserPanel(String url) {
+        try {
+            if (isFinishing() || rootFrame == null) return;
+            if (browserPanelRoot == null) buildBrowserPanel();
+            if (url != null && url.length() > 0 && panelWebView != null) panelWebView.loadUrl(url);
+            browserPanelRoot.setVisibility(View.VISIBLE);
+            browserPanelRoot.bringToFront();
+            McpController.get().recordRunLog("info", "panel", "panel shown url=" + url);
+        } catch (Exception e) {
+            McpController.get().recordRunLog("error", "panel", "showBrowserPanel err " + e);
+        }
+    }
+    private void buildBrowserPanel() {
+        try {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            int w = (int) (dm.widthPixels * 0.86f);
+            int h = (int) (dm.heightPixels * (panelExpanded ? 0.88f : 0.60f));
+            int left = Math.max(0, dm.widthPixels - w - dp(10));
+            int top = Math.max(0, (int) (dm.heightPixels * 0.18f));
+
+            browserPanelRoot = new FrameLayout(this);
+            browserPanelRoot.setBackground(new android.graphics.drawable.GradientDrawable() {
+                {
+                    setColor(Color.WHITE);
+                    setCornerRadius(dp(14));
+                    setStroke(dp(1), 0x22000000);
+                }
+            });
+            browserPanelRoot.setClipToOutline(true);
+            browserPanelRoot.setElevation(dp(14));
+
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+
+            // 标题栏：可拖动
+            final LinearLayout bar = new LinearLayout(this);
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setPadding(dp(12), dp(4), dp(4), dp(4));
+            bar.setBackgroundColor(0xFFF3F4F6);
+            panelTitleView = new TextView(this);
+            panelTitleView.setTextSize(13);
+            panelTitleView.setTextColor(0xFF1F2329);
+            panelTitleView.setSingleLine(true);
+            panelTitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            panelTitleView.setText("小窗浏览");
+            bar.addView(panelTitleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView toggle = new TextView(this);
+            toggle.setText(panelExpanded ? "▽" : "△");
+            toggle.setTextSize(15);
+            toggle.setTextColor(0xFF4B5563);
+            toggle.setGravity(Gravity.CENTER);
+            toggle.setPadding(dp(10), dp(4), dp(10), dp(4));
+            toggle.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    panelExpanded = !panelExpanded;
+                    resizeBrowserPanel();
+                    toggle.setText(panelExpanded ? "▽" : "△");
+                }
+            });
+            bar.addView(toggle);
+            TextView close = new TextView(this);
+            close.setText("✕");
+            close.setTextSize(18);
+            close.setTextColor(0xFF4B5563);
+            close.setGravity(Gravity.CENTER);
+            close.setPadding(dp(10), dp(2), dp(10), dp(4));
+            close.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { closeBrowserPanel(); }
+            });
+            bar.addView(close);
+            panelTitleView.setOnTouchListener(new View.OnTouchListener() {
+                @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
+                    if (browserPanelRoot == null) return false;
+                    int act = ev.getActionMasked();
+                    if (act == android.view.MotionEvent.ACTION_DOWN) {
+                        panelDragLastX = (int) ev.getRawX();
+                        panelDragLastY = (int) ev.getRawY();
+                        return true;
+                    }
+                    if (act == android.view.MotionEvent.ACTION_MOVE) {
+                        int dx = (int) ev.getRawX() - panelDragLastX;
+                        int dy = (int) ev.getRawY() - panelDragLastY;
+                        panelDragLastX = (int) ev.getRawX();
+                        panelDragLastY = (int) ev.getRawY();
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) browserPanelRoot.getLayoutParams();
+                        int maxX = Math.max(0, rootFrame.getWidth() - browserPanelRoot.getWidth());
+                        int maxY = Math.max(0, rootFrame.getHeight() - browserPanelRoot.getHeight());
+                        lp.leftMargin = Math.max(0, Math.min(maxX, lp.leftMargin + dx));
+                        lp.topMargin = Math.max(0, Math.min(maxY, lp.topMargin + dy));
+                        browserPanelRoot.setLayoutParams(lp);
+                        return true;
+                    }
+                    return true;
+                }
+            });
+            col.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)));
+
+            panelWebView = new WebView(this);
+            WebSettings s = panelWebView.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setDomStorageEnabled(true);
+            s.setDatabaseEnabled(true);
+            s.setLoadWithOverviewMode(true);
+            s.setUseWideViewPort(true);
+            s.setBuiltInZoomControls(true);
+            s.setDisplayZoomControls(false);
+            s.setSupportZoom(true);
+            CookieManager.getInstance().setAcceptCookie(true);
+            CookieManager.getInstance().setAcceptThirdPartyCookies(panelWebView, true);
+            panelWebView.setWebViewClient(new WebViewClient() {
+                @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                    view.loadUrl(url);
+                    return true;
+                }
+                @Override public void onPageFinished(WebView view, String url) {
+                    try {
+                        String t = view.getTitle();
+                        if (t == null || t.isEmpty()) t = url;
+                        if (panelTitleView != null) panelTitleView.setText(t.length() > 50 ? t.substring(0, 50) : t);
+                    } catch (Exception ignored) { }
+                }
+            });
+            panelWebView.setWebChromeClient(new WebChromeClient() {
+                @Override public void onReceivedTitle(WebView view, String t) {
+                    try {
+                        if (t != null && !t.isEmpty() && panelTitleView != null)
+                            panelTitleView.setText(t.length() > 50 ? t.substring(0, 50) : t);
+                    } catch (Exception ignored) { }
+                }
+            });
+            col.addView(panelWebView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            browserPanelRoot.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h, Gravity.TOP | Gravity.START);
+            lp.leftMargin = left;
+            lp.topMargin = top;
+            rootFrame.addView(browserPanelRoot, lp);
+            McpController.get().recordRunLog("info", "panel", "panel created " + w + "x" + h);
+        } catch (Exception e) {
+            McpController.get().recordRunLog("error", "panel", "buildBrowserPanel err " + e);
+        }
+    }
+    private void resizeBrowserPanel() {
+        try {
+            if (browserPanelRoot == null) return;
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) browserPanelRoot.getLayoutParams();
+            int w = (int) (dm.widthPixels * 0.86f);
+            int h = (int) (dm.heightPixels * (panelExpanded ? 0.88f : 0.60f));
+            lp.width = w;
+            lp.height = h;
+            int maxX = Math.max(0, rootFrame.getWidth() - w);
+            int maxY = Math.max(0, rootFrame.getHeight() - h);
+            lp.leftMargin = Math.max(0, Math.min(maxX, lp.leftMargin));
+            lp.topMargin = Math.max(0, Math.min(maxY, lp.topMargin));
+            browserPanelRoot.setLayoutParams(lp);
+        } catch (Exception ignored) { }
+    }
+    private void closeBrowserPanel() {
+        try {
+            if (browserPanelRoot == null) return;
+            McpController.get().recordRunLog("info", "panel", "panel closed");
+            if (panelWebView != null) {
+                try {
+                    panelWebView.stopLoading();
+                    panelWebView.setWebViewClient(null);
+                    panelWebView.setWebChromeClient(null);
+                    panelWebView.destroy();
+                } catch (Exception ignored) { }
+            }
+            rootFrame.removeView(browserPanelRoot);
+        } catch (Exception ignored) { }
+        browserPanelRoot = null;
+        panelWebView = null;
+        panelTitleView = null;
+    }
     @Override public void newTab(String url) {
         newTab();
         if (url != null && url.length() > 0 && webView != null) {
@@ -8212,6 +8402,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
 
     @Override
     protected void onDestroy() {
+        closeBrowserPanel();
         McpController.get().stop();
         releaseMcpKeepAliveLock();
         stopKeepAliveService();
