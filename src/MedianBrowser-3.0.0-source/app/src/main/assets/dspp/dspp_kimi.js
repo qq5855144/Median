@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.9.1
-// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复）
+// @version      1.9.2
+// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
 // @grant        none
@@ -238,6 +238,9 @@
   window.__kimiDoneSigs = []; // [{sig, ts}] 带时间戳，去重仅限短时间窗（跨会话不误伤）
   window.__kimiStreaming = false;
   window.__kimiStreamTs = 0;
+  window.__kimiAckPending = false;
+  window.__kimiAckTs = 0;
+  window.__kimiLastAssistTs = 0;
   window.__kimiLastReq = null;
   window.__kimiLastResp = '';
   window.__kimiFailCount = 0;
@@ -324,6 +327,10 @@
       }
       window.__kimiStreaming = true;
       window.__kimiDiag.protoSends++;
+      // v1.9.2：ack 看门狗标记——回传后 45s 内若服务端未生成 assistant 新流（高峰限流/静默丢弃），
+      // 由 ack 看门狗自动 UI 兜底发「继续」，实现无人值守
+      window.__kimiAckPending = true;
+      window.__kimiAckTs = Date.now();
       var body;
       if (last.isBinary) {
         var payload2 = new TextEncoder().encode(JSON.stringify(b));
@@ -604,6 +611,11 @@
         function finalize() {
           window.__kimiStreaming = false;
           try { window.__kimiLastResp = buf; window.__kimiLiveResp = buf; } catch (e) {}
+          // v1.9.2：完整流含 assistant 事件 → 服务端已回复，清除 ack 等待
+          if (buf.indexOf('"role":"assistant"') >= 0) {
+            window.__kimiAckPending = false;
+            window.__kimiLastAssistTs = Date.now();
+          }
           try { handleStreamText(buf); } catch (e) {}
           setTimeout(function () { if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue(); }, 300);
         }
@@ -620,6 +632,11 @@
               }
               buf += td.decode(r.value, { stream: true });
               window.__kimiLiveResp = buf;
+              // v1.9.2：检测到 assistant 消息事件 → 服务端已在回复，清除 ack 等待
+              if (buf.indexOf('"role":"assistant"') >= 0) {
+                window.__kimiAckPending = false;
+                window.__kimiLastAssistTs = Date.now();
+              }
               // 增量解析：标签一旦完整出现立即执行，不等流结束
               if (buf.length - lastLen >= 64) { lastLen = buf.length; handleStreamText(buf); }
               return pump();
@@ -650,6 +667,21 @@
       }
     } catch (e) {}
   }, 15000);
+  // v1.9.2 ack 看门狗：协议层回传工具结果后 45s 内未检测到 assistant 新流（服务端静默丢弃/高峰限流），
+  // 自动 UI 兜底发「继续」，实现无人值守续跑
+  setInterval(function () {
+    try {
+      if (!window.__kimiAckPending) return;
+      if (window.__kimiStreaming) return;
+      if (Date.now() - (window.__kimiAckTs || 0) > 45000) {
+        window.__kimiAckPending = false;
+        if (!window.__kimiBusy) {
+          console.log('[KimiBridge] ack timeout, UI fallback continue');
+          if (uiSendText('继续')) window.__kimiDiag.uiSends++;
+        }
+      }
+    } catch (e) {}
+  }, 10000);
 
   // ---------- 新标签页打开拦截：改为小窗打开，不脱离对话页 ----------
   // Kimi 前端构造跳转 URL 时可能把工具参数 JSON 结尾（"、}）编码进 URL，如
