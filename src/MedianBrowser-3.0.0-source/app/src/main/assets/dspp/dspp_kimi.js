@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.6.0
+// @version      1.7.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -71,14 +71,15 @@
     t += rt.map(function (x) { return '- ' + x.name + ': ' + x.description; }).join('\n');
     t += '\n[TOOL PROTOCOL] To call a tool, output EXACTLY this XML at the END of your message:\n';
     t += '<median_name>full_tool_name</median_name> {"arg":"value"}\n';
-    t += 'The <median_name> tag MUST contain the FULL exact tool name from the list above (including remote.xxx. prefix). ';
-    t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. ';
-    t += '2) After a result arrives you MAY call any tool again to continue, unlimited times. ';
-    t += '3) On tool error, read the error, fix arguments, retry. ';
-    t += '4) Only when the task is COMPLETE output the final answer. ';
-    t += '5) When answering ABOUT the tool list, output plain-text names WITHOUT median_name tags (tags ARE executed).';
-    return t;
-  }
+     t += 'The <median_name> tag MUST contain the FULL exact tool name from the list above (including remote.xxx. prefix). ';
+     t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. ';
+     t += '2) After a result arrives you MAY call any tool again to continue, unlimited times. ';
+     t += '3) On tool error, read the error, fix arguments, retry. ';
+     t += '4) Only when the task is COMPLETE output the final answer. ';
+     t += '5) When answering ABOUT the tool list, output plain-text names WITHOUT median_name tags (tags ARE executed). ';
+     t += '6) When you need to visit/search a web page, prefer browser_panel_open: it opens the target in a floating mini-window so THIS chat page is never navigated away. Use browser_open/browser_nav ONLY if the task explicitly requires navigating the current tab.';
+     return t;
+   }
 
   // ---------- 工具名解析 ----------
   function resolveTool(nm) {
@@ -517,6 +518,49 @@
     }
     return p;
   };
+
+  // ---------- 新标签页打开拦截：改为小窗打开，不脱离对话页 ----------
+  window.__kimiPanelOpen = function (url) {
+    try {
+      var x = new XMLHttpRequest();
+      x.open('POST', window.__kimiMcuBase(), true);
+      x.timeout = 5000;
+      x.setRequestHeader('Content-Type', 'application/json');
+      x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: 'browser_panel_open', arguments: { url: String(url) } } }));
+      return true;
+    } catch (e) { return false; }
+  };
+  (function () {
+    var ORIG_OPEN = window.open;
+    try {
+      window.open = function (url) {
+        try {
+          if (url && typeof url === 'string' && /^https?:\/\//i.test(url)) {
+            window.__kimiPanelOpen(url);
+            return null;
+          }
+        } catch (e) {}
+        return ORIG_OPEN.apply(this, arguments);
+      };
+    } catch (e) {}
+    // 点击 target=_blank / 搜索结果卡片链接 → 小窗打开
+    document.addEventListener('click', function (ev) {
+      try {
+        var el = ev.target;
+        while (el && el !== document && !(el.tagName && el.tagName.toLowerCase() === 'a')) el = el.parentElement;
+        if (!el || el.tagName === undefined) return;
+        var href = el.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href) && !/^\/(search|link)/.test(href)) return;
+        var isBlank = (el.getAttribute('target') || '').toLowerCase() === '_blank';
+        var inResult = el.closest && (el.closest('[class*="search-result"]') || el.closest('[class*="result-card"]') || el.closest('[class*="citation"]'));
+        if (!isBlank && !inResult) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        var abs = el.href || href;
+        window.__kimiPanelOpen(abs);
+      } catch (e) {}
+    }, true);
+  })();
 
   // 注：MCP 探测（同步 XHR）延迟执行，避免拖慢 document-start 计时窗口导致脚本被隔离
   setTimeout(function () { try { window.__kimiMcuBase(); } catch (e) {} }, 1500);

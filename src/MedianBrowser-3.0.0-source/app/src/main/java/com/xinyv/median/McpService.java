@@ -205,8 +205,8 @@ public final class McpService implements MiniHttpServer.Handler {
                 .put("protocolVersion", chosen)
                 .put("capabilities", capabilities)
                 .put("serverInfo", serverInfo)
-                .put("instructions", "Median Browser MCP：用 browser_open 打开网页，browser_screenshot 查看页面，" +
-                        "browser_interactive 获取可点击元素，browser_click_at / browser_type 操作页面，" +
+                .put("instructions", "Median Browser MCP：用 browser_open 打开网页，browser_panel_open 在小窗打开（不影响当前对话页），" +
+                        "browser_screenshot 查看页面，browser_interactive 获取可点击元素，browser_click_at / browser_type 操作页面，" +
                         "browser_dom / browser_text 读取内容，browser_console / browser_network 诊断。")
                 .put("_meta", serverMeta());
     }
@@ -251,6 +251,8 @@ public final class McpService implements MiniHttpServer.Handler {
                 new JSONObject().put("url", prop("string", "要打开的网址")), new String[]{"url"})));
         tools.put(tool("browser_nav", "导航到指定 URL（browser_open 的别名）", schema(
                 new JSONObject().put("url", prop("string", "目标网址")), new String[]{"url"})));
+        tools.put(tool("browser_panel_open", "在小窗中打开指定 URL（浮动小窗浏览器，不占用/不影响当前标签页，如 Kimi 对话页；适合 AI 需要访问网页但不打断对话的场景）", schema(
+                new JSONObject().put("url", prop("string", "要打开的网址")), new String[]{"url"})));
         tools.put(tool("browser_state", "获取浏览器与当前页面状态（URL、标题、加载进度、标签数、MCP 端口）", schema(null, null)));
         tools.put(tool("browser_eval", "在当前页面执行 JavaScript 并返回结果", schema(
                 new JSONObject().put("expression", prop("string", "要执行的 JS 表达式或语句")), new String[]{"expression"})));
@@ -444,6 +446,7 @@ public final class McpService implements MiniHttpServer.Handler {
         if (name == null || name.isEmpty()) return error("tool name required");
         try {
             if ("browser_open".equals(name) || "browser_nav".equals(name)) return open(args);
+            if ("browser_panel_open".equals(name)) return panelOpen(args);
             if ("browser_state".equals(name)) return state();
             if ("browser_eval".equals(name)) return eval(args);
             if ("dspp_diag".equals(name)) return dsppDiag();
@@ -790,6 +793,27 @@ public final class McpService implements MiniHttpServer.Handler {
         long waitMs = args.optLong("waitMs", 2500);
         try { Thread.sleep(Math.max(500, Math.min(waitMs, 8000))); } catch (InterruptedException ignored) { }
         return state();
+    }
+
+    /** 小窗打开 URL：启动浮动小窗 Activity，不影响当前标签页。 */
+    private JSONObject panelOpen(JSONObject args) throws Exception {
+        String url = args.optString("url", "").trim();
+        if (!isHttpUrl(url)) return error("valid http(s) url required");
+        try {
+            android.content.Context ctx = ctl.context();
+            if (ctx == null) return error("app context not ready");
+            android.content.Intent intent = new android.content.Intent(ctx, PanelBrowserActivity.class);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.putExtra(PanelBrowserActivity.EXTRA_URL, url);
+            ctx.startActivity(intent);
+            return new JSONObject()
+                    .put("ok", true)
+                    .put("openedIn", "panel")
+                    .put("url", url)
+                    .put("note", "目标页面已在浮动小窗中打开，当前对话页不受影响");
+        } catch (Exception e) {
+            return error("panel open failed: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
+        }
     }
 
     private JSONObject state() throws Exception {
