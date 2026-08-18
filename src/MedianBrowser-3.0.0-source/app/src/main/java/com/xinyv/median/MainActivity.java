@@ -5932,7 +5932,7 @@ public final class MainActivity extends Activity implements McpController.UiBind
                 {
                     setColor(Color.WHITE);
                     setCornerRadius(dp(14));
-                    setStroke(dp(1), 0x22000000);
+                    setStroke(Math.max(2, (int) (dm.density * 1.5f)), 0xFF9CA3AF);
                 }
             });
             browserPanelRoot.setClipToOutline(true);
@@ -6041,6 +6041,17 @@ public final class MainActivity extends Activity implements McpController.UiBind
             col.addView(panelWebView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             browserPanelRoot.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+            // 右下角缩放把手（隐形触摸区）
+            View resizeBR = new View(this);
+            resizeBR.setOnTouchListener(panelResizeListener(true));
+            FrameLayout.LayoutParams rlpBR = new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM | Gravity.END);
+            browserPanelRoot.addView(resizeBR, rlpBR);
+            // 左下角缩放把手（隐形触摸区）
+            View resizeBL = new View(this);
+            resizeBL.setOnTouchListener(panelResizeListener(false));
+            FrameLayout.LayoutParams rlpBL = new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM | Gravity.START);
+            browserPanelRoot.addView(resizeBL, rlpBL);
+
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h, Gravity.TOP | Gravity.START);
             lp.leftMargin = left;
             lp.topMargin = top;
@@ -6049,6 +6060,52 @@ public final class MainActivity extends Activity implements McpController.UiBind
         } catch (Exception e) {
             McpController.get().recordRunLog("error", "panel", "buildBrowserPanel err " + e);
         }
+    }
+    private android.view.View.OnTouchListener panelResizeListener(final boolean rightEdge) {
+        final int[] st = new int[6]; // 0:downX 1:downY 2:w0 3:h0 4:left0 5:top0
+        return new android.view.View.OnTouchListener() {
+            @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
+                if (browserPanelRoot == null) return false;
+                int act = ev.getActionMasked();
+                if (act == android.view.MotionEvent.ACTION_DOWN) {
+                    FrameLayout.LayoutParams lp0 = (FrameLayout.LayoutParams) browserPanelRoot.getLayoutParams();
+                    st[0] = (int) ev.getRawX();
+                    st[1] = (int) ev.getRawY();
+                    st[2] = lp0.width;
+                    st[3] = lp0.height;
+                    st[4] = lp0.leftMargin;
+                    st[5] = lp0.topMargin;
+                    return true;
+                }
+                if (act == android.view.MotionEvent.ACTION_MOVE) {
+                    int dx = (int) ev.getRawX() - st[0];
+                    int dy = (int) ev.getRawY() - st[1];
+                    DisplayMetrics dm = getResources().getDisplayMetrics();
+                    int minW = (int) (dm.widthPixels * 0.48f);
+                    int minH = (int) (dm.heightPixels * 0.35f);
+                    int maxW = (int) (dm.widthPixels * 0.96f);
+                    int maxH = (int) (dm.heightPixels * 0.94f);
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) browserPanelRoot.getLayoutParams();
+                    if (rightEdge) {
+                        // 右下角：左上角固定，右/下边随手指移动
+                        int w2 = Math.min(maxW, Math.max(minW, st[2] + dx));
+                        int h2 = Math.min(maxH, Math.max(minH, st[3] + dy));
+                        lp.width = Math.min(w2, rootFrame.getWidth() - st[4]);
+                        lp.height = Math.min(h2, rootFrame.getHeight() - st[5]);
+                    } else {
+                        // 左下角：右上角固定，左/下边随手指移动
+                        int newLeft = Math.max(0, Math.min(st[4] + st[2] - minW, st[4] + dx));
+                        lp.leftMargin = newLeft;
+                        lp.width = st[2] + (st[4] - newLeft);
+                        int h2 = Math.min(maxH, Math.max(minH, st[3] + dy));
+                        lp.height = Math.min(h2, rootFrame.getHeight() - st[5]);
+                    }
+                    browserPanelRoot.setLayoutParams(lp);
+                    return true;
+                }
+                return true;
+            }
+        };
     }
     private void resizeBrowserPanel() {
         try {
