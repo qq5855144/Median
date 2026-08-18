@@ -115,7 +115,7 @@
     t += '\n[TOOL PROTOCOL] To call a tool, output EXACTLY this XML at the END of your message:\n';
     t += '<median_name>full_tool_name</median_name> {"arg":"value"}\n';
      t += 'The <median_name> tag MUST contain the FULL exact tool name from the list above (including remote.xxx. prefix). ';
-      t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. NEVER output a second tool call in the same message, NEVER assume or guess the result before it arrives. After the result arrives, you MUST FIRST analyze the result, THEN plan the next action, and ONLY after completing this analysis and planning may you take the next step. Taking any next action before the result is returned and analyzed is STRICTLY FORBIDDEN. ';
+      t += '1) Output ONLY ONE tool call per message, then STOP and WAIT for the result. NEVER output a second tool call in the same message, NEVER assume or guess the result before it arrives. After the result arrives, you MUST FIRST analyze the result, THEN review the current task progress and plan the next action based on that progress, and ONLY after completing this analysis and planning may you take the next step. Taking any next action before the result is returned and analyzed is STRICTLY FORBIDDEN. ';
      t += '2) After a result arrives you MAY call any tool again to continue, unlimited times. ';
      t += '3) On tool error, read the error, fix arguments, retry. ';
      t += '4) Only when the task is COMPLETE output the final answer. ';
