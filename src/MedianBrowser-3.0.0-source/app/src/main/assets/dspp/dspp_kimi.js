@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.2
+// @version      1.14.3
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -880,13 +880,22 @@
       if (!window.__kimiFetchWrapper || window.fetch !== window.__kimiFetchWrapper) kimiInstallFetch();
     } catch (e) {}
   }, 2000);
-  // v1.9.1 流看门狗：streaming 卡死超过 90s（无 done/无 abort 回调）强制复位并续跑
+  // v1.9.1 流看门狗（v1.14.3增强：挂起自动唤醒）——streaming 超过90s且无新数据时，
+  // 复位并自动续跑；无 pendingResult 时协议层发「继续」唤醒 AI（服务端流静默中断场景）
+  var __kimiLastStreamLen = 0;
   setInterval(function () {
     try {
-      if (window.__kimiStreaming && window.__kimiStreamTs && Date.now() - window.__kimiStreamTs > 90000) {
-        console.log('[KimiBridge] stream watchdog: force reset');
-        window.__kimiStreaming = false;
-        if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue();
+      if (window.__kimiStreaming && window.__kimiStreamTs) {
+        var _curLen = (window.__kimiLiveResp || '').length;
+        if (Date.now() - window.__kimiStreamTs > 90000 && _curLen === __kimiLastStreamLen) {
+          console.log('[KimiBridge] stream watchdog: force reset' + (window.__kimiPendingResult ? ' (pending)' : ' (stall, wake up)'));
+          window.__kimiStreaming = false;
+          if (window.__kimiPendingResult && !window.__kimiBusy) autoContinue();
+          else if (!window.__kimiBusy) { try { kimiSendGuide('继续任务'); } catch (e2) {} }
+        }
+        __kimiLastStreamLen = _curLen;
+      } else {
+        __kimiLastStreamLen = 0;
       }
     } catch (e) {}
   }, 15000);
