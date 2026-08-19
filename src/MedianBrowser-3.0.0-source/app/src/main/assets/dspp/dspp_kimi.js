@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.13.1
+// @version      1.13.2
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -500,12 +500,13 @@
       return full;
     } catch (e) { return ''; }
   }
-  function kimiStartRelay() {
+  function kimiStartRelay(reason) {
     if (window.__kimiRelayFired) return;
     window.__kimiRelayFired = true;
+    var reasonTxt = reason === 'token-limit' ? '对话长度上限' : '工具预算限制';
     var ctx = kimiCollectContext();
     var oldPath = location.pathname;
-    console.log('[KimiBridge] budget relay: switching to new chat');
+    console.log('[KimiBridge] relay(' + reasonTxt + '): switching to new chat');
     try {
       var svg = document.querySelector('svg.NewChatAnimatedIcon, svg.new-icon');
       var tgt = svg;
@@ -523,7 +524,7 @@
       var ready = ed && ed.__lexicalEditor && location.pathname !== oldPath;
       if (ready) {
         clearInterval(iv);
-        var msg = '[会话迁移]上一会话因工具预算限制中止。任务上下文如下，请继续执行剩余步骤：\n' + ctx +
+        var msg = '[会话迁移]上一会话因' + reasonTxt + '中止。任务上下文如下，请继续执行剩余步骤：\n' + ctx +
           '\n[迁移说明]工具调用通道正常，请通过工具调用继续任务直至完成。';
         if (!uiSendText(msg)) { setTimeout(function () { try { uiSendText(msg); } catch (e) {} }, 3000); }
         console.log('[KimiBridge] relay message sent');
@@ -750,19 +751,19 @@
           }
           var __dsBefore = (window.__kimiDoneSigs || []).length;
           try { handleStreamText(buf); } catch (e) {}
-          // v1.13.1: 检测服务端对话长度上限提示——记录诊断并尝试 UI 引导新建会话
+          // v1.13.2: 检测服务端对话长度上限提示——旧会话已锁定无法恢复，自动迁移到新会话接力任务
           try {
             if (buf.indexOf('REASON_TOKEN_LENGTH_TOO_LONG') >= 0) {
               window.__kimiDiag.tokenTooLong = (window.__kimiDiag.tokenTooLong || 0) + 1;
-              console.log('[KimiBridge] server TOKEN_LENGTH_TOO_LONG, suggest new chat');
+              console.log('[KimiBridge] server TOKEN_LENGTH_TOO_LONG, auto-relay to new chat');
+              var baseSigs2 = (window.__kimiDoneSigs || []).length;
               setTimeout(function () {
                 try {
-                  if (!window.__kimiStreaming && !window.__kimiPendingResult) {
-                    var tip = '[系统提示] 当前会话已超过 Kimi 服务端对话长度上限，请新建会话继续。桥接教学已改为分级注入，新会话中不会再快速累积。';
-                    uiSendText(tip);
-                  }
-                } catch (e2) {}
-              }, 1500);
+                  var nowSigs2 = (window.__kimiDoneSigs || []).length;
+                  if (nowSigs2 > baseSigs2 || window.__kimiStreaming) { console.log('[KimiBridge] AI resumed, relay cancelled'); return; }
+                } catch (e) {}
+                if (!window.__kimiRelayFired) kimiStartRelay('token-limit');
+              }, 15000);
             }
           } catch (e3) {}
           var __dsAfter = (window.__kimiDoneSigs || []).length;
