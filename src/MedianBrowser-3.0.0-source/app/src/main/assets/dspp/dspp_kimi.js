@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.12.1
+// @version      1.13.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -112,7 +112,14 @@
   function toolSysPrompt() {
     var rt = fetchRemoteTools();
     var t = '[System: You have access to these local device tools via Median Bridge]\n';
-    t += rt.map(function (x) { return '- ' + x.name + ': ' + x.description; }).join('\n');
+    t += rt.map(function (x) {
+      var nm = String(x.name || '');
+      var d = String(x.description || '');
+      // v1.13.0: 描述截断防上下文膨胀(长对话长度限制)。mt_* 工具描述极长(~1400字符), 截断保留关键信息
+      var cap = nm.indexOf('mt_') >= 0 ? 150 : 80;
+      if (d.length > cap) d = d.slice(0, cap) + '...';
+      return '- ' + nm + ': ' + d;
+    }).join('\n');
     t += '\n[HOW TO CALL] To use a tool, END your reply with EXACTLY one line: ';
     t += (rt.length ? '<median_name>full_tool_name</median_name> {"arg":"value"}' : '<median_name>tool_name</median_name> {"arg":"value"}');
     t += ' - replace with the REAL tool name from the list above and the REAL JSON args it needs (keep the <median_name> tag format). Output at most ONE tool call per reply, then STOP and wait for the result.\n';
@@ -563,29 +570,33 @@
       } else if (Array.isArray(v)) {
         // edits 数组：每项都必须是占位符才算示例
         if (v.length === 0) return false;
+        var allPlaceholder = true;
         for (var j = 0; j < v.length; j++) {
           var it = v[j];
-          if (!it || typeof it !== 'object') return false;
+          if (!it || typeof it !== 'object') { allPlaceholder = false; break; }
           var ivs = [it.matchText, it.writeText, it.oldText, it.newText];
           var anyReal = false;
           for (var k = 0; k < ivs.length; k++) {
             if (ivs[k] !== undefined && ivs[k] !== null && ivs[k] !== '' && !/^<[^>]+>$/.test(String(ivs[k]))) { anyReal = true; break; }
           }
-          if (!anyReal) return true; // 全是占位符 -> 示例
+          if (anyReal) { allPlaceholder = false; break; } // 任一项含真实值 -> 非示例
         }
-        // 有真实值则继续检查其他键
+        if (allPlaceholder) return true; // 所有项全占位符 -> 示例
+        return false; // edits 数组含真实值 -> 非示例（核心修改参数真实，不再检查其他键）
       } else {
         return false; // 数字/布尔等真实参数
       }
     }
-    return false;
+    return true; // 所有键值均为占位符 -> 示例
   }
   function handleStreamText(buf) {
     if (!buf) return;
-    var txt = extractStreamText(buf);
+    // v1.13.0: 增量解析——仅扫描尾部48KB(工具标签总在回复末尾), 避免对话增长导致的全量O(n^2)扫描
+    var chunk = buf.length > 49152 ? buf.slice(buf.length - 49152) : buf;
+    var txt = extractStreamText(chunk);
     var calls = parseToolCalls(txt);
-    if (!calls.length) calls = parseToolCalls(buf); // 兜底：兼容纯文本流
-    if (!calls.length) { kimiDetectRelay(txt || buf); return; }
+    if (!calls.length) calls = parseToolCalls(chunk); // 兜底：兼容纯文本流
+    if (!calls.length) { kimiDetectRelay(txt || chunk); return; }
     try { window.__kimiDiag.streams++; } catch (e) {} // v1.12.1: 解析到工具标签的响应流计数（诊断用）
     // 只执行新出现的调用（resolveTool 失败时跳过，继续找下一个真实调用）
     for (var i = 0; i < calls.length; i++) {
@@ -716,7 +727,7 @@
         var lastLen = 0;
         function finalize() {
           window.__kimiStreaming = false;
-          try { window.__kimiLastResp = buf; window.__kimiLiveResp = buf; } catch (e) {}
+          try { var _cap = buf.length > 65536 ? buf.slice(buf.length - 65536) : buf; window.__kimiLastResp = _cap; window.__kimiLiveResp = _cap; } catch (e) {}
           // v1.9.2：完整流含 assistant 事件 → 服务端已回复，清除 ack 等待
           if (buf.indexOf('"role":"assistant"') >= 0) {
             window.__kimiAckPending = false;
@@ -765,7 +776,7 @@
                 return;
               }
               buf += td.decode(r.value, { stream: true });
-              window.__kimiLiveResp = buf;
+              window.__kimiLiveResp = buf.length > 65536 ? buf.slice(buf.length - 65536) : buf;
               // v1.9.2：检测到 assistant 消息事件 → 服务端已在回复，清除 ack 等待
               if (buf.indexOf('"role":"assistant"') >= 0) {
                 window.__kimiAckPending = false;
