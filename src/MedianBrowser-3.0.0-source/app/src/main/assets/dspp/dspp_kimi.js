@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.13.0
+// @version      1.13.1
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -129,6 +129,11 @@
     return t;
 }
 
+  // v1.13.1: 极简教学——长对话防累积(服务端 TOKEN_LENGTH_TOO_LONG)。完整教学每5轮注入一次
+  var __kimiInjCount = 0;
+  function miniSysPrompt() {
+    return '[System: 继续任务。用 <median_name>标签调用本地工具(工具名与参数格式见本会话首条系统消息)，一次一个，收到[System:工具执行结果]后再继续。任务完成即输出最终答案。]\n';
+  }
   // ---------- 工具名解析 ----------
   function resolveTool(nm) {
     if (!nm || typeof nm !== 'string') return null;
@@ -630,6 +635,14 @@
       return o;
     }
     function injectBlocks(bodyObj) {
+      // v1.13.1: 会话切换时重置教学注入计数（新会话首条消息=完整教学）
+      try {
+        var _cur = (location.pathname.match(/\/chat\/([^\/?]+)/) || [])[1] || '';
+        if (_cur && _cur !== window.__kimiLastChatId) {
+          window.__kimiLastChatId = _cur;
+          __kimiInjCount = 0;
+        }
+      } catch (e) {}
       var msg = bodyObj && bodyObj.message;
       if (!msg || !Array.isArray(msg.blocks)) { window.__kimiDiag.capReasons.push('no-blocks'); return false; }
       var found = false;
@@ -653,9 +666,11 @@
                 '\n[结果结束。继续任务。]\n';
               window.__kimiPendingResult = null;
             }
-            // 每次请求注入完整系统提示（长对话后AI遗忘工具格式，需持续可见）
+            // v1.13.1: 教学分级注入——首轮/每5轮完整教学防遗忘, 中间极简教学防服务端长度累积
+            var fullTeach = (__kimiInjCount % 5 === 0);
+            __kimiInjCount++;
             var chatId = (bodyObj && (bodyObj.chatId || bodyObj.chat_id)) || '';
-            var newTxt = inj + toolSysPrompt() + orig;
+            var newTxt = inj + (fullTeach ? toolSysPrompt() : miniSysPrompt()) + orig;
             if (c.case === 'text' && c.value) c.value.content = newTxt;
             else blk.text.content = newTxt;
           }
@@ -735,6 +750,21 @@
           }
           var __dsBefore = (window.__kimiDoneSigs || []).length;
           try { handleStreamText(buf); } catch (e) {}
+          // v1.13.1: 检测服务端对话长度上限提示——记录诊断并尝试 UI 引导新建会话
+          try {
+            if (buf.indexOf('REASON_TOKEN_LENGTH_TOO_LONG') >= 0) {
+              window.__kimiDiag.tokenTooLong = (window.__kimiDiag.tokenTooLong || 0) + 1;
+              console.log('[KimiBridge] server TOKEN_LENGTH_TOO_LONG, suggest new chat');
+              setTimeout(function () {
+                try {
+                  if (!window.__kimiStreaming && !window.__kimiPendingResult) {
+                    var tip = '[系统提示] 当前会话已超过 Kimi 服务端对话长度上限，请新建会话继续。桥接教学已改为分级注入，新会话中不会再快速累积。';
+                    uiSendText(tip);
+                  }
+                } catch (e2) {}
+              }, 1500);
+            }
+          } catch (e3) {}
           var __dsAfter = (window.__kimiDoneSigs || []).length;
           // v1.9.9：Kimi 原生工具拦截检测——AI 使用内置工具（代码解释器等）且本轮无标签工具被执行时，
           // 自动发送纠正引导，把 AI 拉回标签协议（2分钟限频）
