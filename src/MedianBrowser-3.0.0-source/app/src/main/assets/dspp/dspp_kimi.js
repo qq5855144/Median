@@ -674,6 +674,7 @@
             // v1.13.1: 教学分级注入——首轮/每5轮完整教学防遗忘, 中间极简教学防服务端长度累积
             var fullTeach = (__kimiInjCount % 5 === 0);
             __kimiInjCount++;
+            try { window.__kimiInjCount = __kimiInjCount; } catch (e) {} // v1.14.0: 暴露注入计数供诊断
             var chatId = (bodyObj && (bodyObj.chatId || bodyObj.chat_id)) || '';
             var newTxt = inj + (fullTeach ? toolSysPrompt() : miniSysPrompt()) + orig;
             if (c.case === 'text' && c.value) c.value.content = newTxt;
