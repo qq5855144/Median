@@ -13,6 +13,7 @@
   'use strict';
   if (window.__medianKimi) return;
   window.__medianKimi = true;
+  window.__medianExtractJson=function(t,from){if(!t||typeof t!=='string')return null;var i=from||0;i=t.indexOf('{',i);if(i<0)return null;var d=0,ins=false,esc=false;for(var j=i;j<t.length;j++){var c=t.charAt(j);if(ins){if(esc){esc=false;}else if(c==='\\'){esc=true;}else if(c==='"'){ins=false;}}else{if(c==='"'){ins=true;}else if(c==='{'){d++;}else if(c==='}'){d--;if(d===0){return t.substring(i,j+1);}}}}return null;};
 
   var CHAT_URL_MARK = '/apiv2/kimi.gateway.chat.v1.ChatService/';
   var CHAT_API = 'https://www.kimi.com/apiv2/kimi.gateway.chat.v1.ChatService/Chat';
@@ -214,8 +215,8 @@
         var _am2 = _rest.match(/<median_args>([\s\S]*?)<\/median_args>|<arguments>([\s\S]*?)<\/arguments>/);
         if (_am2) { try { _a2 = JSON.parse(_am2[1] || _am2[2]); } catch (e) {} }
         else {
-          var _j2 = _rest.match(/\{[\s\S]*?\}/);
-          if (_j2) { try { _a2 = JSON.parse(_j2[0]); } catch (e) {} }
+          var _j2 = window.__medianExtractJson(_rest);
+          if (_j2) { try { _a2 = JSON.parse(_j2); } catch (e) {} }
           if (!_a2 || Object.keys(_a2).length === 0) {
             // 流截断兜底：JSON 不完整但 url 字段已完整时直接提取（AI 常用 browser_open {"url":"..."}）
             var _um = _rest.match(/"url"\s*:\s*"([^"]+)"/i);
