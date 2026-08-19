@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.1
+// @version      1.14.2
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -386,6 +386,14 @@
         if (onFail) onFail();
         return;
       }
+      // v1.14.2: 回传请求同样关闭 thinking/plugin 提速
+      try {
+        var _bOpts = b && b.options;
+        if (_bOpts && typeof _bOpts === 'object') {
+          _bOpts.thinking = false;
+          _bOpts.enable_plugin = false;
+        }
+      } catch (eOpts2) {}
       var msg = b.message || {};
       var blocks = msg.blocks || [];
       var injected = false;
@@ -695,6 +703,15 @@
             var newTxt = inj + (fullTeach ? toolSysPrompt() : miniSysPrompt()) + orig;
             if (c.case === 'text' && c.value) c.value.content = newTxt;
             else blk.text.content = newTxt;
+            // v1.14.2: 提速——关闭思考模式与插件。Kimi thinking 输出大量思考文本(22:1)拖慢
+            // 每轮往返(工具间隔~58s); enable_plugin 导致 AI 频繁尝试内置工具(ipython)浪费轮次
+            try {
+              var _opts = bodyObj && bodyObj.options;
+              if (_opts && typeof _opts === 'object') {
+                _opts.thinking = false;
+                _opts.enable_plugin = false;
+              }
+            } catch (eOpts) {}
           }
           break;
         }
