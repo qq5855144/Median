@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.13.2
+// @version      1.14.0
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -618,9 +618,13 @@
   }
 
   // ---------- fetch 拦截 ----------
-  var ORIG_FETCH = window.fetch;
-  try { window.__medianOrigFetch = ORIG_FETCH; } catch (e) {}  // 暴露原始fetch供热注入恢复
-  window.fetch = function (input, init) {
+  // v1.14.0: fetch 包装改为可重装+守护——Kimi 前端(Next.js)路由切换/懒加载 chunk 会重新包装
+  // window.fetch 覆盖桥接拦截器，导致教学注入链断裂(AI 不知道有本地工具而拒绝任务)。守护每2秒
+  // 检测一次，被覆盖立即重装(捕获最新 fetch 链式调用)，保证消息请求始终经过教学注入。
+  function kimiInstallFetch() {
+    var curFetch = window.fetch;
+    try { window.__medianOrigFetch = curFetch; } catch (e) {}  // 暴露原始fetch供热注入恢复
+    window.fetch = function (input, init) {
     var url = (typeof input === 'string') ? input : (input && input.url) || '';
     // 只对消息发送端点做注入；GetChat/ListMessages 等是 JSON5 请求体，无需处理
     var isChat = url.indexOf(CHAT_URL_MARK) >= 0 && /\/Chat([?#]|$)/.test(url);
@@ -732,7 +736,7 @@
       if (!capOk) console.log('[KimiBridge] capture skip', url.slice(-40), window.__kimiDiag.capReasons.slice(-2));
     }
 
-    var p = ORIG_FETCH.apply(this, arguments);
+    var p = curFetch.apply(this, arguments);
 
     if (isChat) {
       window.__kimiStreaming = true;
@@ -833,6 +837,15 @@
     }
     return p;
   };
+    try { window.__kimiFetchWrapper = window.fetch; } catch (e) {}
+  }
+  kimiInstallFetch();
+  // v1.14.0: fetch 守护——被框架覆盖立即重装，保证消息请求始终经过教学注入
+  setInterval(function () {
+    try {
+      if (!window.__kimiFetchWrapper || window.fetch !== window.__kimiFetchWrapper) kimiInstallFetch();
+    } catch (e) {}
+  }, 2000);
   // v1.9.1 流看门狗：streaming 卡死超过 90s（无 done/无 abort 回调）强制复位并续跑
   setInterval(function () {
     try {
