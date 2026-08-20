@@ -324,7 +324,8 @@
       s = s.replace(/,\s*([}\]])/g, '$1');
       return s;
     }
-    f = String(f).replace(/(^|[^<\/])median_name>/g, '$1<median_name>').replace(/(^|[^<\/])median_call>/g, '$1<median_call>').replace(/(^|[^<\/])median_tool_call>/g, '$1<median_tool_call>');
+    // v1.15.2: 标签归一化——AI常输出<medianname>(缺下划线)或大小写变体,统一转为<median_name>后再解析
+    f = String(f).replace(/<medianname\s*>/gi, '<median_name>').replace(/<\/medianname\s*>/gi, '</median_name>').replace(/<medianname\s*\/>/gi, '<median_name>').replace(/(^|[^<\/])median_name>/g, '$1<median_name>').replace(/(^|[^<\/])median_call>/g, '$1<median_call>').replace(/(^|[^<\/])median_tool_call>/g, '$1<median_tool_call>');
     var calls = [];
     var re1 = /<median_tool_call>([\s\S]*?)<\/median_tool_call>|<median_call>([\s\S]*?)<\/median_call>/g, m1;
     while ((m1 = re1.exec(f))) {
