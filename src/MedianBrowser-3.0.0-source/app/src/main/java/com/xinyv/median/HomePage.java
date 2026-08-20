@@ -28,6 +28,7 @@ final class HomePage {
         String tileRadius = "circle".equals(options.tileShape) ? "50%" : ("square".equals(options.tileShape) ? "8px" : "16px");
         StringBuilder shortcuts = new StringBuilder();
         shortcuts.append("<a class='shortcut' href='https://chat.deepseek.com/'><span class='tile'>DS</span><span class='label'>DeepSeek</span></a>");
+        shortcuts.append("<a class='shortcut' href='https://chatglm.cn/miniapp/home?lang=zh'><span class='tile'>GLM</span><span class='label'>智谱清言</span></a>");
         int count = options.showShortcuts ? Math.min(12, bookmarks == null ? 0 : bookmarks.size()) : 0;
         if (options.showShortcuts) {
             for (int i = 0; i < count; i++) {
