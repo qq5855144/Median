@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.9
+// @version      1.14.10
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流、参数模板纠偏、重复失败强制纠偏、Python原生工具意图拦截）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -63,28 +63,51 @@
 
   // ---------- MCP 连接（8788 固定 + 探测兜底） ----------
   window.__kimiMcu = '';
+  window.__kimiMcuProbing = false;
   window.__kimiMcuBase = function () {
     try {
       if (window.__kimiMcu) return window.__kimiMcu;
-      var cand = [];
-      if (window.__mcpPort && window.__mcpPort > 0) cand.push(window.__mcpPort);
-      for (var q = 8788; q <= 8799; q++) { if (cand.indexOf(q) < 0) cand.push(q); }
-      for (var i = 0; i < cand.length; i++) {
-        try {
-          var x = new XMLHttpRequest();
-          x.open('POST', 'http://127.0.0.1:' + cand[i] + '/mcp', false);
-          x.setRequestHeader('Content-Type', 'application/json');
-          x.send('{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}');
-          if (x.status === 200) {
-            var d = JSON.parse(x.responseText || '{}');
-            if (d && d.result && d.result.tools) {
-              window.__kimiMcu = 'http://127.0.0.1:' + cand[i] + '/mcp';
-              return window.__kimiMcu;
-            }
-          }
-        } catch (e) {}
-      }
-      window.__kimiMcu = 'http://127.0.0.1:8788/mcp';
+      // v1.14.10: 不再同步逐端口探测——同步XHR在端口不可达时会阻塞主线程导致页面卡死。
+      // 优先用注入端口, 否则默认8788, 立即返回; 后台异步探测候选端口并更新
+      if (window.__mcpPort && window.__mcpPort > 0) window.__kimiMcu = 'http://127.0.0.1:' + window.__mcpPort + '/mcp';
+      else window.__kimiMcu = 'http://127.0.0.1:8788/mcp';
+      try {
+        if (!window.__kimiMcuProbing) {
+          window.__kimiMcuProbing = true;
+          (function () {
+            var cand = [];
+            if (window.__mcpPort && window.__mcpPort > 0) cand.push(window.__mcpPort);
+            for (var q = 8788; q <= 8799; q++) { if (cand.indexOf(q) < 0) cand.push(q); }
+            var idx = 0;
+            var probe = function () {
+              if (idx >= cand.length) { window.__kimiMcuProbing = false; return; }
+              var p = cand[idx++];
+              try {
+                var x = new XMLHttpRequest();
+                x.open('POST', 'http://127.0.0.1:' + p + '/mcp', true);
+                x.timeout = 3000;
+                x.setRequestHeader('Content-Type', 'application/json');
+                x.onreadystatechange = function () {
+                  if (x.readyState !== 4) return;
+                  try {
+                    var d = JSON.parse(x.responseText || '{}');
+                    if (x.status === 200 && d && d.result && d.result.tools) {
+                      window.__kimiMcu = 'http://127.0.0.1:' + p + '/mcp';
+                      window.__kimiMcuProbing = false;
+                      return;
+                    }
+                  } catch (e) {}
+                  probe();
+                };
+                x.ontimeout = function () { probe(); };
+                x.onerror = function () { probe(); };
+                x.send('{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}');
+              } catch (e) { probe(); }
+            };
+            probe();
+          })();
+        }
+      } catch (e) {}
       return window.__kimiMcu;
     } catch (e) {
       window.__kimiMcu = 'http://127.0.0.1:8788/mcp';
@@ -93,19 +116,48 @@
   };
   window.__kimiRemoteTools = [];
   window.__kimiRemoteTs = 0;
+  window.__kimiRemoteLoading = false;
+  // v1.14.10: 关键工具 fallback——MT MCP 未就绪/慢时立即返回, 避免同步XHR阻塞主线程卡死页面
+  var __kimiFallbackTools = [
+    { name: 'remote.MT MCP.mt_apk_list_available_apks', description: '列出设备上可直接使用的APK文件' },
+    { name: 'remote.MT MCP.mt_apk_open', description: '打开APK建立工作区,返回workspaceId' },
+    { name: 'remote.MT MCP.mt_apk_read_text', description: '读取APK内类/资源文本,返回targetVersion' },
+    { name: 'remote.MT MCP.mt_apk_search', description: '在APK内搜索类/方法/字符串' },
+    { name: 'remote.MT MCP.mt_apk_edit_open', description: '打开编辑会话,返回editSessionId' },
+    { name: 'remote.MT MCP.mt_apk_edit_text', description: '编辑smali文本,需workspaceId/editSessionId/locator/targetVersion/edits' },
+    { name: 'remote.MT MCP.mt_apk_edit_check', description: '构建检查,参数runBuildChecks' },
+    { name: 'remote.MT MCP.mt_apk_build', description: '构建APK,参数outputName/overwrite' },
+    { name: 'fs_list_dir', description: '列出目录内容' },
+    { name: 'fs_find_file', description: '按文件名模式搜索文件' }
+  ];
   function fetchRemoteTools() {
     try {
       var now = Date.now();
       if (window.__kimiRemoteTools.length > 0 && now - window.__kimiRemoteTs < 15000) return window.__kimiRemoteTools;
-      var x = new XMLHttpRequest();
-      x.open('POST', window.__kimiMcuBase(), false);
-      x.setRequestHeader('Content-Type', 'application/json');
-      x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/list', params: {} }));
-      var res = JSON.parse(x.responseText || '{}');
-      window.__kimiRemoteTools = (res && res.result && res.result.tools) || [];
-      window.__kimiRemoteTs = now;
-      return window.__kimiRemoteTools;
-    } catch (e) { return []; }
+      // v1.14.10: 后台异步刷新——同步XHR在MCP不可达时会无限阻塞主线程导致页面卡死
+      if (!window.__kimiRemoteLoading) {
+        window.__kimiRemoteLoading = true;
+        try {
+          var x = new XMLHttpRequest();
+          x.open('POST', window.__kimiMcuBase(), true);
+          x.timeout = 5000;
+          x.setRequestHeader('Content-Type', 'application/json');
+          x.onreadystatechange = function () {
+            if (x.readyState !== 4) return;
+            window.__kimiRemoteLoading = false;
+            try {
+              var res = JSON.parse(x.responseText || '{}');
+              var tools = (res && res.result && res.result.tools) || [];
+              if (tools.length) { window.__kimiRemoteTools = tools; window.__kimiRemoteTs = Date.now(); }
+            } catch (e) {}
+          };
+          x.ontimeout = function () { window.__kimiRemoteLoading = false; };
+          x.onerror = function () { window.__kimiRemoteLoading = false; };
+          x.send(JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/list', params: {} }));
+        } catch (e) { window.__kimiRemoteLoading = false; }
+      }
+      return window.__kimiRemoteTools.length ? window.__kimiRemoteTools : __kimiFallbackTools;
+    } catch (e) { return __kimiFallbackTools; }
   }
 
   // ---------- system prompt ----------
