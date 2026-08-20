@@ -516,7 +516,8 @@
       if (!window.__glmStreaming) autoContinue();
     });
   }// ---------- 协议层发送（connect JSON，复用最后一次请求参数） ----------
-  function sendChatText(text, onFail) {
+    function sendChatText(text, onFail) {
+    try { if (uiSendText(text)) { try { window.__glmDiag.uiSends = (window.__glmDiag.uiSends || 0) + 1; } catch (e) {} return; } } catch (eU) {}
     var last = window.__glmLastReq;
     if (!last) { console.log('[GlmBridge] no last req'); if (onFail) onFail(); return; }
     try {
@@ -546,34 +547,63 @@
   }
 
   // ---------- UI 层发送（Lexical + Enter，已验证可靠） ----------
-  function uiSendText(text) {
+    function uiSendText(text) {
     try {
       var ed = document.querySelector('.chat-input-editor');
-      if (!ed || !ed.__lexicalEditor) { console.log('[GlmBridge] no lexical editor'); return false; }
-      var lex = ed.__lexicalEditor;
-      var j = lex.getEditorState().toJSON();
-      var para = j && j.root && j.root.children && j.root.children[0] &&
-        j.root.children[0].children && j.root.children[0].children[0];
-      if (!para) { console.log('[GlmBridge] no para'); return false; }
-      para.text = text;
-      var ns = null;
-      try { ns = lex.parseEditorState(JSON.stringify(j)); }
-      catch (e1) { try { ns = lex.parseEditorState(j); }
-        catch (e2) { console.log('[GlmBridge] parseEditorState err', String(e2)); return false; } }
-      try { lex.setEditorState(ns); }
-      catch (e3) { console.log('[GlmBridge] setEditorState err', String(e3)); return false; }
-      try { lex.focus(); } catch (e4) {}
-      var opts = { key: 'Enter', keyCode: 13, which: 13, code: 'Enter', bubbles: true, cancelable: true, composed: true };
-      try { ed.dispatchEvent(new KeyboardEvent('keydown', opts)); }
-      catch (e5) {
-        try { var ev = document.createEvent('KeyboardEvent');
-          ev.initKeyboardEvent('keydown', true, true, null, 'Enter', 0, '');
-          ed.dispatchEvent(ev); }
-        catch (e6) { console.log('[GlmBridge] keydown err', String(e6)); return false; }
+      if (ed && ed.__lexicalEditor) {
+        var lex = ed.__lexicalEditor;
+        var j = lex.getEditorState().toJSON();
+        var para = j && j.root && j.root.children && j.root.children[0] &&
+          j.root.children[0].children && j.root.children[0].children[0];
+        if (para) {
+          para.text = text;
+          var ns = null;
+          try { ns = lex.parseEditorState(JSON.stringify(j)); }
+          catch (e1) { try { ns = lex.parseEditorState(j); } catch (e2) { ns = null; } }
+          if (ns) { try { lex.setEditorState(ns); } catch (e3) { ns = null; } }
+          if (ns) {
+            try { lex.focus(); } catch (e4) {}
+            var opts = { key: 'Enter', keyCode: 13, which: 13, code: 'Enter', bubbles: true, cancelable: true, composed: true };
+            try { ed.dispatchEvent(new KeyboardEvent('keydown', opts)); console.log('[GlmBridge] uiSendText lexical ok'); return true; }
+            catch (e5) {
+              try { var ev = document.createEvent('KeyboardEvent'); ev.initKeyboardEvent('keydown', true, true, null, 'Enter', 0, ''); ed.dispatchEvent(ev); console.log('[GlmBridge] uiSendText lexical ok2'); return true; }
+              catch (e6) {}
+            }
+          }
+        }
       }
-      console.log('[GlmBridge] uiSendText ok');
+    } catch (e) {}
+    try {
+      var ta = document.querySelector('textarea');
+      if (!ta) { console.log('[GlmBridge] no input found'); return false; }
+      var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      ta.focus();
+      setter.call(ta, text);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+      var btn = document.querySelector('.button-right-inner');
+      if (!btn) {
+        var all = [].slice.call(document.querySelectorAll('div,button,span'));
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].children.length > 0) continue;
+          var t = (all[i].innerText || '').trim();
+          if (t.indexOf('发送') >= 0 && t.length < 8) { btn = all[i]; break; }
+        }
+      }
+      if (!btn) { console.log('[GlmBridge] no send btn'); return false; }
+      var r = btn.getBoundingClientRect();
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0 };
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend'].forEach(function (type) {
+        try {
+          if (type.indexOf('pointer') === 0) btn.dispatchEvent(new PointerEvent(type, opts));
+          else if (type.indexOf('mouse') === 0) btn.dispatchEvent(new MouseEvent(type, opts));
+          else btn.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: [new Touch({ identifier: 1, target: btn, clientX: cx, clientY: cy })] }));
+        } catch (e) {}
+      });
+      console.log('[GlmBridge] uiSendText textarea ok');
       return true;
-    } catch (e) { console.log('[GlmBridge] uiSendText err', String(e && e.message || e)); return false; }
+    } catch (e) { console.log('[GlmBridge] uiSendText ta err', String(e && e.message || e)); return false; }
   }
 
   var __glmUiRetryCount = 0;
@@ -855,7 +885,7 @@
       } catch (e) {}
       return o;
     }
-    function injectBlocks(bodyObj) {
+        function injectBlocks(bodyObj) {
       var msgs = bodyObj && bodyObj.messages;
       if (!msgs || !Array.isArray(msgs)) { try { window.__glmDiag.capReasons.push('no-messages'); } catch (e) {} return false; }
       try {
@@ -886,9 +916,9 @@
             inj = '[System: 工具执行结果]\n' + window.__glmPendingResult + '\n[结果结束。继续任务。]\n';
             window.__glmPendingResult = null;
           }
-          var fullTeach = ((window.__glmInjCount || 0) % 5 === 0);
+          var isFirst = ((window.__glmInjCount || 0) === 0);
           window.__glmInjCount = (window.__glmInjCount || 0) + 1;
-          var newTxt = inj + (fullTeach ? toolSysPrompt() : miniSysPrompt()) + orig;
+          var newTxt = inj + (isFirst ? toolSysPrompt() : '') + orig;
           for (var j2 = 0; j2 < cts.length; j2++) {
             var it2 = cts[j2] || {};
             if (it2.type === 'text' && typeof it2.text === 'string') { it2.text = newTxt; break; }
