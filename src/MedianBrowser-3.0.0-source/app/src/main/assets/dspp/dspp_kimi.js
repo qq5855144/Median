@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.8
-// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流）
+// @version      1.14.9
+// @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流、参数模板纠偏、重复失败强制纠偏、Python原生工具意图拦截）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
 // @grant        none
@@ -570,7 +570,27 @@
         return;
       }
     } catch (eSE8) {}
-    var txt = '[System: 工具执行结果]\n' + window.__kimiPendingResult +
+    // v1.14.9: 防线1+2+3 —— 参数修复模板 / 连续失败强制纠偏 / Python意图提示
+    var _fixHint = '';
+    try {
+      var _pend9 = String(window.__kimiPendingResult || '');
+      var _isParamErr = /missing\s+edits|badValue|missing\s+parameter|missing\s+field|\u53c2\u6570\u7f3a\u5931|\u7f3a\u5c11\u53c2\u6570|invalid\s+json|json\s*parse/i.test(_pend9);
+      var _isFail9 = !/\"ok\"\s*:\s*true/.test(_pend9) && /error|fail|missing|invalid|exception/i.test(_pend9);
+      if (_isParamErr) {
+        _fixHint += '\n[\u53c2\u6570\u4fee\u590d\u6a21\u677f] \u82e5\u62a5 Missing edits/badValue\uff1a\u8bf4\u660e JSON \u7f3a\u5c11 edits \u6570\u7ec4\u3002edit_text \u5b8c\u6574\u6a21\u677f\uff1a{\"workspaceId\":\"<\u771f\u5b9ews>\",\"editSessionId\":\"<\u771f\u5b9eesid>\",\"locator\":\"dex_class:LXxx;\",\"targetVersion\":\"<read_text\u8fd4\u56de\u7684\u6700\u65b0\u503c>\",\"edits\":[{\"mode\":\"replace_match\",\"matchText\":\"<\u65e7smali\u7cbe\u786e\u539f\u6587>\",\"writeText\":\"<\u65b0smali>\"}]}\u3002edits \u5143\u7d20\u53ea\u542b mode/matchText/writeText \u4e09\u4e2a\u952e\uff0c\u590d\u5236\u6a21\u677f\u6539\u503c\u540e\u91cd\u8bd5\u3002\n';
+      }
+      if (_isFail9) window.__kimiFailSeq = (window.__kimiFailSeq || 0) + 1;
+      else window.__kimiFailSeq = 0;
+      if (window.__kimiFailSeq >= 3) {
+        _fixHint += '\n[\u5f3a\u5236\u7ea0\u504f] \u540c\u4e00\u5de5\u5177\u5df2\u8fde\u7eed\u5931\u8d25 ' + window.__kimiFailSeq + ' \u6b21\uff0c\u505c\u6b62\u8bd5\u9519\u5faa\u73af\uff01\u2460\u56de\u770b\u672c\u4f1a\u8bdd\u9996\u6761\u7cfb\u7edf\u6d88\u606f\u4e2d\u7684\u5de5\u5177\u5217\u8868\u4e0e [APK EDIT] \u5de5\u4f5c\u6d41\u793a\u4f8b\uff1b\u2461\u7528 <median_name> \u6807\u7b7e\u4e00\u6b21\u8c03\u7528\uff0c\u53c2\u6570\u7528\u771f\u5b9e\u503c\uff08edits \u6570\u7ec4\u5143\u7d20\u53ea\u542b mode/matchText/writeText\uff09\uff1b\u2462targetVersion \u62a5\u9519\u5c31\u5148 mt_apk_read_text \u91cd\u65b0\u8bfb\u53d6\u6700\u65b0\u503c\u518d\u7f16\u8f91\uff1b\u2463\u7981\u6b62\u8f93\u51fa\u603b\u7ed3\u3001\u7981\u6b62\u653e\u5f03\u3001\u7981\u6b62\u4f7f\u7528 Python \u4ee3\u7801\u5de5\u5177\u3002\u7acb\u5373\u6267\u884c\uff01\n';
+        window.__kimiFailSeq = 0;
+      }
+      if (window.__kimiPyWarn > 0) {
+        _fixHint += '\n[\u7981\u6b62\u539f\u751f\u5de5\u5177] \u68c0\u6d4b\u5230\u4f60\u5c1d\u8bd5\u8fd0\u884c Python/\u4ee3\u7801\u5757\u2014\u2014\u90a3\u4e9b\u5de5\u5177\u5728\u6c99\u7bb1\u4e2d\u65e0\u6cd5\u8bbf\u95ee\u8bbe\u5907\u6587\u4ef6\uff01\u53ea\u80fd\u7528 <median_name> \u6807\u7b7e\u8c03\u7528\u672c\u5730\u5de5\u5177\u3002\u7acb\u5373\u6539\u7528 <median_name> \u8c03\u7528\u3002\n';
+        window.__kimiPyWarn = 0;
+      }
+    } catch (eFix9) {}
+    var txt = '[System: 工具执行结果]\n' + window.__kimiPendingResult + _fixHint +
       '\n[结果结束。继续任务。]';
     var pending = window.__kimiPendingResult;
     window.__kimiPendingResult = null;
@@ -713,7 +733,24 @@
     var txt = extractStreamText(chunk);
     var calls = parseToolCalls(txt);
     if (!calls.length) calls = parseToolCalls(chunk); // 兜底：兼容纯文本流
-    if (!calls.length) { kimiDetectRelay(txt || chunk); return; }
+    if (!calls.length) {
+      // v1.14.9: Python/原生代码执行意图检测
+      try {
+        var _ct9 = String(txt || chunk || '');
+        if (/\u8fd0\u884c\s*(python|\u4ee3\u7801)|```python|ipython|subprocess|\bexec\s*\(/i.test(_ct9)) {
+          var _n9 = Date.now();
+          if (!window.__kimiPyWarnTs || _n9 - window.__kimiPyWarnTs > 30000) {
+            window.__kimiPyWarn = (window.__kimiPyWarn || 0) + 1;
+            window.__kimiPyWarnTs = _n9;
+            if (window.__kimiPyWarn <= 3) {
+              kimiSendGuide('[系统提示:禁止原生工具] 检测到你在输出 Python/代码块或代码执行意图——这些工具在沙箱中无法访问 Android 文件！必须用 <median_name> 标签调用本地工具继续任务。');
+              console.log('[KimiBridge] python-code warn sent #' + window.__kimiPyWarn);
+            }
+          }
+        }
+      } catch (ePy9) {}
+      kimiDetectRelay(txt || chunk); return;
+    }
     try { window.__kimiDiag.streams++; } catch (e) {} // v1.12.1: 解析到工具标签的响应流计数（诊断用）
     // 只执行新出现的调用（resolveTool 失败时跳过，继续找下一个真实调用）
     for (var i = 0; i < calls.length; i++) {
