@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.10
+// @version      1.14.11
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流、参数模板纠偏、重复失败强制纠偏、Python原生工具意图拦截）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -314,6 +314,16 @@
 
   // ---------- 工具调用标签解析 ----------
   function parseToolCalls(f) {
+    // v1.14.11: JSON修复——AI输出的JSON中多行smali(matchText/writeText)常为未转义真实换行,导致JSON.parse失败
+    function jsonRepair(s) {
+      s = String(s || '');
+      s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      s = s.replace(/:\s*"((?:[^"\\]|\\[\s\S])*)"/g, function (m, inner) {
+        return ': "' + inner.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t') + '"';
+      });
+      s = s.replace(/,\s*([}\]])/g, '$1');
+      return s;
+    }
     f = String(f).replace(/(^|[^<\/])median_name>/g, '$1<median_name>').replace(/(^|[^<\/])median_call>/g, '$1<median_call>').replace(/(^|[^<\/])median_tool_call>/g, '$1<median_tool_call>');
     var calls = [];
     var re1 = /<median_tool_call>([\s\S]*?)<\/median_tool_call>|<median_call>([\s\S]*?)<\/median_call>/g, m1;
@@ -323,7 +333,7 @@
       var _am = _in.match(/<median_args>([\s\S]*?)<\/median_args>|<arguments>([\s\S]*?)<\/arguments>/);
       var _raw = (_am && (_am[1] || _am[2])) || '{}';
       var _a = {};
-      try { _a = JSON.parse(_raw); } catch (e) {}
+      try { _a = JSON.parse(_raw); } catch (e) { try { _a = JSON.parse(jsonRepair(_raw)); } catch (e2) {} }
       if (_nm) calls.push({ nm: _nm, args: _a });
     }
     if (!calls.length) {
@@ -334,11 +344,11 @@
         var _rest = m2[2] || '';
         var _a2 = {};
         var _am2 = _rest.match(/<median_args>([\s\S]*?)<\/median_args>|<arguments>([\s\S]*?)<\/arguments>/);
-        if (_am2) { try { _a2 = JSON.parse(_am2[1] || _am2[2]); } catch (e) {} }
+        if (_am2) { try { _a2 = JSON.parse(_am2[1] || _am2[2]); } catch (e) { try { _a2 = JSON.parse(jsonRepair(_am2[1] || _am2[2])); } catch (e2) {} } }
         else {
           var _rest2 = String(_rest).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
           var _j2 = window.__medianExtractJson(_rest2);
-          if (_j2) { try { _a2 = JSON.parse(_j2); } catch (e) {} }
+          if (_j2) { try { _a2 = JSON.parse(_j2); } catch (e) { try { _a2 = JSON.parse(jsonRepair(_j2)); } catch (e2) {} } }
           if (!_a2 || Object.keys(_a2).length === 0) {
             // 流截断兜底：JSON 不完整但 url 字段已完整时直接提取（AI 常用 browser_open {"url":"..."}）
             var _um = _rest2.match(/"url"\s*:\s*"([^"]+)"/i);
@@ -355,7 +365,32 @@
                   else if (_m8[2] !== undefined) { _fld8[_kws8[_ki8]] = _m8[2] === 'true' ? true : (_m8[2] === 'false' ? false : Number(_m8[2])); }
                 }
               }
-              if (Object.keys(_fld8).length > 0) _a2 = _fld8;
+              if (Object.keys(_fld8).length > 0) {
+                // v1.14.11: edits数组兜底重建——大JSON(多行smali)解析失败时从原文提取edits项
+                if (_fld8.edits === undefined && /\"edits\"\s*:/.test(_rest2)) {
+                  try {
+                    var _eds11 = [];
+                    var _em11 = _rest2.match(/\"edits\"\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
+                    if (_em11) {
+                      var _body11 = _em11[1];
+                      var _parts11 = _body11.replace(/^\[/, '').replace(/\]$/, '').split(/\}\s*,\s*\{/);
+                      for (var _ei11 = 0; _ei11 < _parts11.length; _ei11++) {
+                        var _it11 = _parts11[_ei11].replace(/^\{/, '').replace(/\}$/, '');
+                        var _item11 = {};
+                        var _md11 = _it11.match(/\"mode\"\s*:\s*\"([^\"]*)\"/);
+                        if (_md11) _item11.mode = _md11[1];
+                        var _mt11 = _it11.match(/\"matchText\"\s*:\s*(\"(?:[^\"\\]|\\.)*\")/);
+                        if (_mt11) { try { _item11.matchText = JSON.parse(_mt11[1]); } catch (e) { _item11.matchText = _mt11[1].replace(/^\"|\"$/g, ''); } }
+                        var _wt11 = _it11.match(/\"writeText\"\s*:\s*(\"(?:[^\"\\]|\\.)*\")/);
+                        if (_wt11) { try { _item11.writeText = JSON.parse(_wt11[1]); } catch (e) { _item11.writeText = _wt11[1].replace(/^\"|\"$/g, ''); } }
+                        if (_item11.matchText !== undefined || _item11.writeText !== undefined) _eds11.push(_item11);
+                      }
+                      if (_eds11.length) _fld8.edits = _eds11;
+                    }
+                  } catch (eE11) {}
+                }
+                _a2 = _fld8;
+              }
             }
           }
         }
