@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.11
+// @version      1.14.12
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流、参数模板纠偏、重复失败强制纠偏、Python原生工具意图拦截）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -815,6 +815,15 @@
   }
   function handleStreamText(buf) {
     if (!buf) return;
+    // v1.14.12: native tool_call diag
+    try {
+      if (buf.indexOf('tool_call_id') >= 0 && (buf.indexOf('"tool"') >= 0 || buf.indexOf('block.tool') >= 0)) {
+        window.__kimiDiag.nativeToolBlocks = (window.__kimiDiag.nativeToolBlocks || 0) + 1;
+        var __mN = buf.match(/"name":"[^"]{1,80}"/g) || [];
+        var __mT = buf.match(/tool_call_id[^,}]{0,120}/g) || [];
+        window.__kimiDiag.nativeToolLast = (__mN.length ? __mN.slice(-2).join(',') : '') + '|' + (__mT.length ? __mT.slice(-1)[0] : '') + '|' + buf.slice(-300);
+      }
+    } catch (eNat2) {}
     // v1.13.0: 增量解析——仅扫描尾部48KB(工具标签总在回复末尾), 避免对话增长导致的全量O(n^2)扫描
     var chunk = buf.length > 49152 ? buf.slice(buf.length - 49152) : buf;
     var txt = extractStreamText(chunk);
@@ -932,6 +941,19 @@
         try { window.__kimiDiag.lastNoTextBody = JSON.stringify(bodyObj).substring(0, 300); } catch (e) {}
         return false;
       }
+      // v1.14.12: native tool declaration inject
+      try {
+        if (bodyObj && Array.isArray(bodyObj.tools)) {
+          var __hasDev = false;
+          for (var __ti = 0; __ti < bodyObj.tools.length; __ti++) {
+            if (bodyObj.tools[__ti] && bodyObj.tools[__ti].type === 'TOOL_TYPE_DEVICE_TOOL') { __hasDev = true; break; }
+          }
+          if (!__hasDev) {
+            bodyObj.tools.push({ type: 'TOOL_TYPE_DEVICE_TOOL', name: 'median_mt_bridge' });
+            window.__kimiDiag.nativeInjected = (window.__kimiDiag.nativeInjected || 0) + 1;
+          }
+        }
+      } catch (eNat) {}
       return true;
     }
 
