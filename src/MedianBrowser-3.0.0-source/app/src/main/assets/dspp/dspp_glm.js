@@ -316,7 +316,9 @@
   function parseToolCalls(f) {
     // v1.14.11: JSON修复——AI输出的JSON中多行smali(matchText/writeText)常为未转义真实换行,导致JSON.parse失败
     function jsonRepair(s) {
+      // v1.15.3: 全角字符归一化——AI常输出全角引号/冒号/逗号({“prefix”:“”}),JSON.parse必失败
       s = String(s || '');
+      s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/：/g, ':').replace(/，/g, ',');
       s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       s = s.replace(/:\s*"((?:[^"\\]|\\[\s\S])*)"/g, function (m, inner) {
         return ': "' + inner.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t') + '"';
