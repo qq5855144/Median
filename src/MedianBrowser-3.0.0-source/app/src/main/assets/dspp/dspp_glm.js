@@ -520,7 +520,46 @@
     });
   }// ---------- 协议层发送（connect JSON，复用最后一次请求参数） ----------
     function sendChatText(text, onFail) {
-    try { if (uiSendText(text)) { try { window.__glmDiag.uiSends = (window.__glmDiag.uiSends || 0) + 1; } catch (e) {} return; } } catch (eU) {}
+    try {
+      if (uiSendText(text)) {
+        try { window.__glmDiag.uiSends = (window.__glmDiag.uiSends || 0) + 1; } catch (e) {}
+        // v1.15.4: UI发送后延迟验证——若请求未发出(reqs未增长), 说明UI通道实际失败(如"发送消息不能为空"), 回退协议层
+        var _reqsBefore = 0;
+        try { _reqsBefore = window.__glmDiag.reqs || 0; } catch (eR) {}
+        setTimeout(function () {
+          try {
+            var _reqsAfter = window.__glmDiag.reqs || 0;
+            if (_reqsAfter > _reqsBefore) { return; } // UI通道成功
+            console.log('[GlmBridge] UI send verify FAIL (reqs not growing) - fallback to proto');
+            var last = window.__glmLastReq;
+            if (!last) { if (onFail) onFail(); return; }
+            var b = JSON.parse(JSON.stringify(last.bodyObj));
+            if (window.__glmConvId && !b.conversation_id) b.conversation_id = window.__glmConvId;
+            var msgs = b.messages || [];
+            if (!Array.isArray(msgs)) msgs = [];
+            msgs.push({ role: 'user', content: [{ type: 'text', text: text }] });
+            b.messages = msgs;
+            window.__glmStreaming = true;
+            try { window.__glmDiag.protoSends = (window.__glmDiag.protoSends || 0) + 1; } catch (eP) {}
+            window.__glmAckPending = true;
+            window.__glmAckTs = Date.now();
+            (window.__glmFetchWrapper || window.fetch)(last.url, {
+              method: 'POST',
+              headers: last.headers || {},
+              body: JSON.stringify(b),
+              credentials: 'include'
+            }).then(function (resp) {
+              if (!resp || !resp.ok) { window.__glmStreaming = false; console.log('[GlmBridge] proto fallback bad resp', resp && resp.status); if (onFail) onFail(); }
+            }).catch(function (e) {
+              window.__glmStreaming = false;
+              console.log('[GlmBridge] autoContinue proto err', String(e));
+              if (onFail) onFail();
+            });
+          } catch (eV) { console.log('[GlmBridge] UI verify err', String(eV && eV.message || eV)); }
+        }, 1500);
+        return;
+      }
+    } catch (eU) {}
     var last = window.__glmLastReq;
     if (!last) { console.log('[GlmBridge] no last req'); if (onFail) onFail(); return; }
     try {
@@ -582,8 +621,14 @@
       var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
       ta.focus();
       setter.call(ta, text);
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      // v1.15.4: 用 InputEvent(inputType=insertText) 替代普通 Event, 更贴近真实输入, 确保框架(v-model/onChange)感知
+      try {
+        ta.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      } catch (eIn) {
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       ta.dispatchEvent(new Event('change', { bubbles: true }));
+      // v1.15.4: 等待 Vue 微任务/nextTick 完成后再点击发送(受控组件 state 异步更新)
       var btn = document.querySelector('.button-right-inner');
       if (!btn) {
         var all = [].slice.call(document.querySelectorAll('div,button,span'));
@@ -594,17 +639,26 @@
         }
       }
       if (!btn) { console.log('[GlmBridge] no send btn'); return false; }
-      var r = btn.getBoundingClientRect();
-      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0 };
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend'].forEach(function (type) {
-        try {
-          if (type.indexOf('pointer') === 0) btn.dispatchEvent(new PointerEvent(type, opts));
-          else if (type.indexOf('mouse') === 0) btn.dispatchEvent(new MouseEvent(type, opts));
-          else btn.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: [new Touch({ identifier: 1, target: btn, clientX: cx, clientY: cy })] }));
-        } catch (e) {}
-      });
-      console.log('[GlmBridge] uiSendText textarea ok');
+      var __glmSent = false;
+      var doClick = function () {
+        if (__glmSent) return;
+        // 点击前验证 value 是否仍保持(受控组件若 state 未更新会被重置为空)
+        if (!ta.value || ta.value.length === 0) { console.log('[GlmBridge] ta value reset - retry inject'); return; }
+        var r = btn.getBoundingClientRect();
+        var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0 };
+        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend'].forEach(function (type) {
+          try {
+            if (type.indexOf('pointer') === 0) btn.dispatchEvent(new PointerEvent(type, opts));
+            else if (type.indexOf('mouse') === 0) btn.dispatchEvent(new MouseEvent(type, opts));
+            else btn.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: [new Touch({ identifier: 1, target: btn, clientX: cx, clientY: cy })] }));
+          } catch (e) {}
+        });
+        __glmSent = true;
+        console.log('[GlmBridge] uiSendText textarea ok');
+      };
+      setTimeout(doClick, 250);
+      setTimeout(doClick, 600);
       return true;
     } catch (e) { console.log('[GlmBridge] uiSendText ta err', String(e && e.message || e)); return false; }
   }
