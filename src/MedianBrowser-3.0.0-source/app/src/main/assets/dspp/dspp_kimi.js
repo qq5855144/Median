@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Median Kimi 工具桥接
 // @namespace    median.kimi-bridge
-// @version      1.14.12
+// @version      1.14.13
 // @description  为 www.kimi.com 注入 Median 本地设备工具链（MCP 桥接、工具调用解析、自动续跑、预算接力、流中断自恢复、回复确认看门狗、反循环防护、结果分析-计划-行动约束、APK编辑工作流、参数模板纠偏、重复失败强制纠偏、Python原生工具意图拦截）
 // @match        *://www.kimi.com/*
 // @run-at       document-start
@@ -815,13 +815,29 @@
   }
   function handleStreamText(buf) {
     if (!buf) return;
-    // v1.14.12: native tool_call diag
+    // v1.14.13: native ToolBlock execution
     try {
       if (buf.indexOf('tool_call_id') >= 0 && (buf.indexOf('"tool"') >= 0 || buf.indexOf('block.tool') >= 0)) {
         window.__kimiDiag.nativeToolBlocks = (window.__kimiDiag.nativeToolBlocks || 0) + 1;
-        var __mN = buf.match(/"name":"[^"]{1,80}"/g) || [];
-        var __mT = buf.match(/tool_call_id[^,}]{0,120}/g) || [];
-        window.__kimiDiag.nativeToolLast = (__mN.length ? __mN.slice(-2).join(',') : '') + '|' + (__mT.length ? __mT.slice(-1)[0] : '') + '|' + buf.slice(-300);
+        var __tbName = (buf.match(/"name":"([^"]{1,90})"/) || [])[1] || '';
+        var __taM = buf.match(/"args":"((?:[^"\\]|\\.)*)"/);
+        var __taS = __taM ? __taM[1].replace(/\\"/g, "").replace(/\\\\/g, String.fromCharCode(92)) : '';
+        var __argsObj = {};
+        try { __argsObj = JSON.parse(__taS || '{}'); } catch (eArgsP) {}
+        var __tidM = buf.match(/tool_call_id":"?([A-Za-z0-9_:-]{1,60})/) || [];
+        var __tid = __tidM[1] || '';
+        window.__kimiNativeCalls = window.__kimiNativeCalls || {};
+        if (__tid && window.__kimiNativeCalls[__tid]) { /* already handled */ }
+        else {
+          if (__tid) window.__kimiNativeCalls[__tid] = 1;
+          window.__kimiDiag.nativeToolLast = __tbName + '|' + __taS.slice(0, 200);
+          var __short = String(__tbName).replace(/^.*\.MT_MCP\./, '').replace(/^.*\.mt_/, 'mt_');
+          if (__short && __short.indexOf('mt_') === 0 && !window.__kimiBusy && !window.__kimiPendingResult) {
+            window.__kimiDiag.nativeExecuted = (window.__kimiDiag.nativeExecuted || 0) + 1;
+            try { toolAndContinue(__short, __argsObj); }
+            catch (eTb) { console.log('[KimiBridge] native exec err', String(eTb && eTb.message || eTb)); }
+          }
+        }
       }
     } catch (eNat2) {}
     // v1.13.0: 增量解析——仅扫描尾部48KB(工具标签总在回复末尾), 避免对话增长导致的全量O(n^2)扫描
@@ -941,15 +957,29 @@
         try { window.__kimiDiag.lastNoTextBody = JSON.stringify(bodyObj).substring(0, 300); } catch (e) {}
         return false;
       }
-      // v1.14.12: native tool declaration inject
+      // v1.14.13: native tool declaration inject (schema-enriched)
       try {
         if (bodyObj && Array.isArray(bodyObj.tools)) {
           var __hasDev = false;
           for (var __ti = 0; __ti < bodyObj.tools.length; __ti++) {
-            if (bodyObj.tools[__ti] && bodyObj.tools[__ti].type === 'TOOL_TYPE_DEVICE_TOOL') { __hasDev = true; break; }
+            if (bodyObj.tools[__ti] && bodyObj.tools[__ti].type === 'TOOL_TYPE_DEVICE_TOOL' && bodyObj.tools[__ti].name === 'mt_apk_list_available_apks') { __hasDev = true; break; }
           }
           if (!__hasDev) {
-            bodyObj.tools.push({ type: 'TOOL_TYPE_DEVICE_TOOL', name: 'median_mt_bridge' });
+            var __nts = [
+              { n: 'mt_apk_list_available_apks', d: 'List APK files available on this Android device', p: '{"prefix":{"type":"string","description":"optional name prefix filter"}}' },
+              { n: 'mt_apk_open', d: 'Open an APK workspace for analysis/editing, returns workspaceId', p: '{"path":{"type":"string","description":"APK file path"},"temporary":{"type":"boolean"}}' },
+              { n: 'mt_apk_edit_open', d: 'Open an edit session on a smali class, returns editSessionId', p: '{"workspaceId":{"type":"string"},"classPath":{"type":"string","description":"smali class path"}}' },
+              { n: 'mt_apk_edit_text', d: 'Apply edits (array of {matchText,writeText}) to a class', p: '{"workspaceId":{"type":"string"},"editSessionId":{"type":"string"},"edits":{"type":"array","description":"array of {matchText,writeText}"}}' },
+              { n: 'mt_apk_read_text', d: 'Read text content from a workspace file/class', p: '{"workspaceId":{"type":"string"},"path":{"type":"string"}}' },
+              { n: 'mt_apk_read_bytes', d: 'Read raw bytes from a workspace file', p: '{"workspaceId":{"type":"string"},"path":{"type":"string"}}' },
+              { n: 'mt_apk_dex_xref', d: 'Find cross-references to a method or field', p: '{"workspaceId":{"type":"string"},"target":{"type":"string","description":"method/field signature"}}' },
+              { n: 'mt_apk_build', d: 'Build the modified APK into final signed apk', p: '{"workspaceId":{"type":"string"},"runBuildCheck":{"type":"boolean"}}' },
+              { n: 'mt_apk_close', d: 'Close an APK workspace', p: '{"workspaceId":{"type":"string"}}' }
+            ];
+            for (var __ni = 0; __ni < __nts.length; __ni++) {
+              var __nt = __nts[__ni];
+              bodyObj.tools.push({ type: 'TOOL_TYPE_DEVICE_TOOL', name: __nt.n, metadata: { description: __nt.d, parameters: __nt.p } });
+            }
             window.__kimiDiag.nativeInjected = (window.__kimiDiag.nativeInjected || 0) + 1;
           }
         }
